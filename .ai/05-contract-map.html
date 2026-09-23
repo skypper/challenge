@@ -1,0 +1,278 @@
+<title>ACRDX Contract Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F4F6F8; --panel:#FFFFFF; --ink:#1B2530; --muted:#5C6B78; --line:#C7D0D8; --band:#EAEFF3;
+  --shares:#1F7A8C; --price:#B4690E; --cash:#2E7D4F; --alert:#B42318; --chron:#5B4B9E;
+  --shares-bg:#E3F1F4; --price-bg:#FBEEDC; --cash-bg:#E4F2EA; --chron-bg:#ECE8F6;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0F1418; --panel:#161D23; --ink:#E6ECF0; --muted:#8A9BA8; --line:#2E3B46; --band:#1A222A;
+  --shares:#5FC0D0; --price:#E5A650; --cash:#5DB883; --alert:#F0655A; --chron:#A99AE6;
+  --shares-bg:#12313A; --price-bg:#3A2A10; --cash-bg:#123324; --chron-bg:#261F42;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F1418; --panel:#161D23; --ink:#E6ECF0; --muted:#8A9BA8; --line:#2E3B46; --band:#1A222A;
+  --shares:#5FC0D0; --price:#E5A650; --cash:#5DB883; --alert:#F0655A; --chron:#A99AE6;
+  --shares-bg:#12313A; --price-bg:#3A2A10; --cash-bg:#123324; --chron-bg:#261F42;
+}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.5;padding-inline:20px;padding-block:32px 64px}
+main{max-width:980px;margin:0 auto}
+h1{font-size:26px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+h2{font-size:18px;font-weight:600;margin:40px 0 8px;text-wrap:balance}
+p{max-width:68ch;margin:0 0 12px}
+.sub{color:var(--muted);margin-bottom:24px}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13px}
+figure{margin:16px 0 0;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
+figure svg{display:block;width:100%;height:auto;color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif}
+figcaption{color:var(--muted);font-size:13px;padding:10px 4px 2px;max-width:none}
+.scroll{overflow-x:auto}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:13px;color:var(--muted);margin:10px 0 0}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid var(--line)}
+.legend .s::before{background:var(--shares-bg);border-color:var(--shares)}
+.legend .p::before{background:var(--price-bg);border-color:var(--price)}
+.legend .c::before{background:var(--cash-bg);border-color:var(--cash)}
+.legend .h::before{background:var(--chron-bg);border-color:var(--chron)}
+.legend .a::before{background:transparent;border:1px dashed var(--alert)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:12px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;border:1px solid;margin-right:4px}
+.tag.s{color:var(--shares);border-color:var(--shares)} .tag.p{color:var(--price);border-color:var(--price)} .tag.c{color:var(--cash);border-color:var(--cash)} .tag.h{color:var(--chron);border-color:var(--chron)}
+.alert{color:var(--alert)}
+@media (max-width:600px){ th:nth-child(3),td:nth-child(3){display:none} }
+</style>
+
+<main>
+<h1>ACRDX contract map</h1>
+<p class="sub">Every contract that holds one of the three numbers in the brief, and how a price and a redemption travel between them. Ethereum mainnet, read 2026‑09‑22.</p>
+
+<h2>1. Who holds what</h2>
+<p>ACRDX is not one contract. Shares live in the token, the settlement price lives in the Spoke, cash lives in the escrow, and the hub keeps a second ledger that is supposed to mirror all three. Chronicle is a separate pipe that never touches Centrifuge's contracts.</p>
+
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 960 580" role="img" aria-label="Map of the ACRDX contracts on Ethereum: off-chain fund admin feeds both the Centrifuge issuer and Chronicle validators; the issuer writes the reference price to the hub and spoke in one transaction and separately passes an execution price to the BatchRequestManager, which has no link to the reference price; redemptions flow from the vault through the request manager and balance sheet to burn shares and pay USDC from the pool escrow.">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+  <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--alert)"/></marker>
+  <marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--chron)"/></marker>
+</defs>
+<g font-size="12">
+<!-- off-chain band -->
+<text x="30" y="14" font-size="11" fill="var(--muted)" letter-spacing=".08em">OFF-CHAIN</text>
+<rect x="30" y="20" width="190" height="50" rx="4" fill="var(--cash-bg)" stroke="var(--cash)"/>
+<text x="125" y="40" text-anchor="middle" font-weight="600">Apollo credit fund</text>
+<text x="125" y="56" text-anchor="middle" fill="var(--muted)">the real assets and cash</text>
+<rect x="380" y="20" width="200" height="50" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="480" y="40" text-anchor="middle" font-weight="600">Fund administrator</text>
+<text x="480" y="56" text-anchor="middle" fill="var(--muted)">computes NAV per share, daily</text>
+<rect x="470" y="95" width="200" height="50" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="570" y="115" text-anchor="middle" font-weight="600">Centrifuge issuer key</text>
+<text x="570" y="131" text-anchor="middle" fill="var(--muted)">signs price + settlement txs</text>
+<rect x="740" y="95" width="190" height="50" rx="4" fill="var(--chron-bg)" stroke="var(--chron)"/>
+<text x="835" y="115" text-anchor="middle" font-weight="600">Chronicle validators</text>
+<text x="835" y="131" text-anchor="middle" fill="var(--muted)">independent quorum</text>
+<!-- off-chain arrows -->
+<line x1="220" y1="45" x2="380" y2="45" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="300" y="40" text-anchor="middle" fill="var(--muted)">portfolio values</text>
+<line x1="480" y1="70" x2="480" y2="95" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="490" y="86" fill="var(--muted)">NAV</text>
+<path d="M580 45H835V95" fill="none" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="705" y="40" text-anchor="middle" fill="var(--muted)">NAV, own copy</text>
+<!-- issuer to hub / brm -->
+<path d="M600 145V170H130V210" fill="none" stroke="var(--price)" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="330" y="183" text-anchor="middle" fill="var(--price)">updateSharePrice + notifySharePrice, one tx, ~daily</text>
+<path d="M545 145V157H16V418H30" fill="none" stroke="var(--price)" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="330" y="153" text-anchor="middle" fill="var(--price)">approveRedeems / revokeShares(price) — price is a plain argument</text>
+<!-- validators to oracle -->
+<line x1="835" y1="145" x2="835" y2="210" stroke="var(--chron)" stroke-width="1.5" marker-end="url(#ahc)"/>
+<text x="843" y="182" fill="var(--chron)">poke ~20 min</text>
+
+<!-- ethereum band -->
+<rect x="8" y="190" width="944" height="382" rx="6" fill="var(--band)" stroke="var(--line)"/>
+<text x="20" y="206" font-size="11" fill="var(--muted)" letter-spacing=".08em">ETHEREUM MAINNET</text>
+<rect x="22" y="200" width="216" height="352" rx="4" fill="none" stroke="var(--line)" stroke-dasharray="3 3"/>
+<text x="130" y="565" text-anchor="middle" font-size="11" fill="var(--muted)">HUB SIDE (ledger, epochs)</text>
+<rect x="270" y="200" width="470" height="352" rx="4" fill="none" stroke="var(--line)" stroke-dasharray="3 3"/>
+<text x="505" y="565" text-anchor="middle" font-size="11" fill="var(--muted)">SPOKE SIDE (token, vault, cash)</text>
+
+<!-- hub column -->
+<rect x="30" y="210" width="200" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="130" y="232" text-anchor="middle" font-weight="600">Hub</text>
+<text x="130" y="248" text-anchor="middle" fill="var(--muted)">entry point for the issuer</text>
+<rect x="30" y="300" width="200" height="56" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="130" y="320" text-anchor="middle" font-weight="600">ShareClassManager</text>
+<text x="130" y="336" text-anchor="middle" fill="var(--muted)">reference price · totalIssuance = 0</text>
+<rect x="30" y="390" width="200" height="56" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="130" y="410" text-anchor="middle" font-weight="600">BatchRequestManager</text>
+<text x="130" y="426" text-anchor="middle" fill="var(--muted)">redeem epochs · execution price</text>
+<rect x="30" y="480" width="200" height="56" rx="4" fill="var(--panel)" stroke="var(--line)"/>
+<text x="130" y="500" text-anchor="middle" font-weight="600" fill="var(--muted)">Holdings</text>
+<text x="130" y="516" text-anchor="middle" fill="var(--muted)">hub view of cash · never initialised</text>
+<line x1="130" y1="266" x2="130" y2="300" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="138" y="287" fill="var(--muted)">stores</text>
+<line x1="130" y1="356" x2="130" y2="390" stroke="var(--alert)" stroke-dasharray="4 3" marker-end="url(#ahr)"/>
+<text x="138" y="377" fill="var(--alert)">no check</text>
+<line x1="230" y1="228" x2="280" y2="228" stroke="var(--price)" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="230" y1="430" x2="280" y2="430" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="255" y="424" text-anchor="middle" fill="var(--muted)" font-size="10">callback</text>
+<line x1="280" y1="508" x2="230" y2="508" stroke="var(--alert)" stroke-dasharray="4 3" marker-end="url(#ahr)"/>
+<text x="255" y="524" text-anchor="middle" fill="var(--alert)" font-size="10">never sent</text>
+
+<!-- spoke column -->
+<rect x="280" y="210" width="200" height="56" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="380" y="230" text-anchor="middle" font-weight="600">Spoke</text>
+<text x="380" y="246" text-anchor="middle" fill="var(--muted)">settlement price · maxAge = ∞</text>
+<rect x="280" y="300" width="200" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="380" y="320" text-anchor="middle" font-weight="600">AsyncVault (USDC)</text>
+<text x="380" y="336" text-anchor="middle" fill="var(--muted)">ERC‑7540 request / claim</text>
+<rect x="280" y="390" width="200" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="380" y="410" text-anchor="middle" font-weight="600">AsyncRequestManager</text>
+<text x="380" y="426" text-anchor="middle" fill="var(--muted)">per‑investor pending / claimable</text>
+<rect x="280" y="480" width="200" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="380" y="500" text-anchor="middle" font-weight="600">BalanceSheet</text>
+<text x="380" y="516" text-anchor="middle" fill="var(--muted)">mints, burns, moves USDC</text>
+<line x1="380" y1="266" x2="380" y2="300" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="388" y="287" fill="var(--muted)">pricePerShare()</text>
+<line x1="380" y1="356" x2="380" y2="390" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="388" y="377" fill="var(--muted)">requests</text>
+<line x1="380" y1="446" x2="380" y2="480" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="388" y="467" fill="var(--muted)">revoke / issue</text>
+
+<!-- token column -->
+<rect x="530" y="300" width="200" height="56" rx="4" fill="var(--shares-bg)" stroke="var(--shares)"/>
+<text x="630" y="320" text-anchor="middle" font-weight="600">ShareToken ACRDX</text>
+<text x="630" y="336" text-anchor="middle" fill="var(--muted)">totalSupply 237,532.68</text>
+<rect x="530" y="390" width="200" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="630" y="410" text-anchor="middle" font-weight="600">FullRestrictions hook</text>
+<text x="630" y="426" text-anchor="middle" fill="var(--muted)">whitelist, checked on every move</text>
+<rect x="530" y="480" width="200" height="56" rx="4" fill="var(--cash-bg)" stroke="var(--cash)"/>
+<text x="630" y="500" text-anchor="middle" font-weight="600">PoolEscrow</text>
+<text x="630" y="516" text-anchor="middle" fill="var(--muted)">253 USDC · 39,538 shares pending</text>
+<line x1="630" y1="356" x2="630" y2="390" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="638" y="377" fill="var(--muted)">asks</text>
+<path d="M480 496H505V328H530" fill="none" stroke="var(--shares)" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="497" y="322" text-anchor="end" fill="var(--shares)" font-size="11">mint / burn</text>
+<line x1="480" y1="516" x2="530" y2="516" stroke="var(--cash)" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="505" y="530" text-anchor="middle" fill="var(--cash)" font-size="10">USDC</text>
+
+<!-- external column -->
+<rect x="760" y="210" width="170" height="56" rx="4" fill="var(--chron-bg)" stroke="var(--chron)"/>
+<text x="845" y="230" text-anchor="middle" font-weight="600">Chronicle oracle</text>
+<text x="845" y="246" text-anchor="middle" fill="var(--muted)">read() · readWithAge()</text>
+<text x="845" y="283" text-anchor="middle" fill="var(--chron)" font-size="11">read by lenders + your monitor</text>
+<rect x="760" y="300" width="170" height="56" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="845" y="320" text-anchor="middle" font-weight="600">Investor</text>
+<text x="845" y="336" text-anchor="middle" fill="var(--muted)">whitelisted address</text>
+<line x1="760" y1="328" x2="730" y2="328" stroke="var(--shares)" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="745" y="345" text-anchor="middle" fill="var(--shares)" font-size="10">holds</text>
+<path d="M845 356V372H430V356" fill="none" stroke="currentColor" marker-end="url(#ah)"/>
+<text x="640" y="368" text-anchor="middle" fill="var(--muted)" font-size="11">requestRedeem / withdraw</text>
+<rect x="760" y="480" width="170" height="56" rx="4" fill="var(--cash-bg)" stroke="var(--cash)"/>
+<text x="845" y="500" text-anchor="middle" font-weight="600">OnOfframpManager</text>
+<text x="845" y="516" text-anchor="middle" fill="var(--muted)">cash to / from custody</text>
+<line x1="730" y1="508" x2="760" y2="508" stroke="var(--cash)" stroke-width="1.5" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="930" y1="508" x2="948" y2="508" stroke="var(--cash)" stroke-dasharray="3 2" marker-end="url(#ah)"/>
+</g>
+</svg>
+</div>
+<div class="legend"><span class="s">shares</span><span class="p">price (Centrifuge)</span><span class="h">price (Chronicle)</span><span class="c">cash</span><span class="a">link that should exist but does not</span></div>
+<figcaption>The issuer key writes the reference price and, in a different transaction, passes an execution price into the BatchRequestManager. The two are never compared on-chain. The hub's own ledger (Holdings, totalIssuance) is empty because the BalanceSheet queue is never submitted.</figcaption>
+</figure>
+
+<h2>2. Why there are two price pipes</h2>
+<p>Centrifuge's price is the issuer talking to its own system. Chronicle's price is an independent witness for people who cannot trust the issuer's key: lending markets that take ACRDX as collateral, and your monitor. In August the left pipe stalled for eleven days and the right one did not.</p>
+
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 960 250" role="img" aria-label="Two pipes from the same NAV: Centrifuge pipe goes issuer key to hub and spoke reference price, and separately issuer key to revokeShares execution price with no on-chain comparison; Chronicle pipe goes validators to oracle to lenders. The monitor compares execution price against Chronicle.">
+<defs>
+  <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+  <marker id="ah2r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--alert)"/></marker>
+  <marker id="ah2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--cash)"/></marker>
+</defs>
+<g font-size="12">
+<rect x="380" y="16" width="200" height="44" rx="4" fill="var(--panel)" stroke="currentColor"/>
+<text x="480" y="34" text-anchor="middle" font-weight="600">NAV per share</text>
+<text x="480" y="50" text-anchor="middle" fill="var(--muted)">one number, computed daily</text>
+
+<text x="200" y="98" text-anchor="middle" font-size="11" fill="var(--price)" letter-spacing=".08em">CENTRIFUGE PIPE</text>
+<text x="760" y="98" text-anchor="middle" font-size="11" fill="var(--chron)" letter-spacing=".08em">CHRONICLE PIPE</text>
+
+<path d="M380 38H200V106" fill="none" stroke="currentColor" marker-end="url(#ah2)"/>
+<path d="M580 38H760V106" fill="none" stroke="currentColor" marker-end="url(#ah2)"/>
+
+<rect x="100" y="106" width="200" height="44" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="200" y="124" text-anchor="middle" font-weight="600">Issuer key</text>
+<text x="200" y="140" text-anchor="middle" fill="var(--muted)">one signer, no quorum</text>
+
+<rect x="660" y="106" width="200" height="44" rx="4" fill="var(--chron-bg)" stroke="var(--chron)"/>
+<text x="760" y="124" text-anchor="middle" font-weight="600">Validator quorum</text>
+<text x="760" y="140" text-anchor="middle" fill="var(--muted)">signed, then poked on-chain</text>
+
+<path d="M150 150V190" fill="none" stroke="var(--price)" stroke-width="1.5" marker-end="url(#ah2)"/>
+<path d="M250 150V190" fill="none" stroke="var(--price)" stroke-width="1.5" marker-end="url(#ah2)"/>
+<path d="M760 150V190" fill="none" stroke="var(--chron)" stroke-width="1.5" marker-end="url(#ah2)"/>
+
+<rect x="20" y="190" width="200" height="44" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="120" y="208" text-anchor="middle" font-weight="600">Reference price</text>
+<text x="120" y="224" text-anchor="middle" fill="var(--muted)">Spoke + ShareClassManager</text>
+
+<rect x="240" y="190" width="200" height="44" rx="4" fill="var(--price-bg)" stroke="var(--price)"/>
+<text x="340" y="208" text-anchor="middle" font-weight="600">Execution price</text>
+<text x="340" y="224" text-anchor="middle" fill="var(--muted)">revokeShares(price) → payout</text>
+
+<rect x="660" y="190" width="200" height="44" rx="4" fill="var(--chron-bg)" stroke="var(--chron)"/>
+<text x="760" y="208" text-anchor="middle" font-weight="600">Chronicle oracle</text>
+<text x="760" y="224" text-anchor="middle" fill="var(--muted)">read by Morpho, Grove, you</text>
+
+<line x1="220" y1="212" x2="240" y2="212" stroke="var(--alert)" stroke-dasharray="4 3" marker-end="url(#ah2r)"/>
+<text x="230" y="246" text-anchor="middle" fill="var(--alert)" font-size="11">not compared on-chain</text>
+
+<path d="M440 212H660" fill="none" stroke="var(--cash)" stroke-width="1.5" stroke-dasharray="6 3" marker-end="url(#ah2g)" marker-start="url(#ah2g)"/>
+<text x="550" y="205" text-anchor="middle" fill="var(--cash)" font-size="11">your monitor: |Δ| in bps, and age</text>
+</g>
+</svg>
+</div>
+<figcaption>Same input, two trust roots. The only comparison that would have caught August is the dashed green one, and it has to be built off-chain.</figcaption>
+</figure>
+
+<h2>3. One redemption, traced (Aug 14, 2026)</h2>
+<p>Investor <span class="mono">0xd81e…545d</span> (a Gnosis Safe). Every hop below is an event you can subscribe to.</p>
+<table>
+<thead><tr><th>When (UTC)</th><th>Contract · event</th><th>What moved</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td class="n">Aug 11 12:15</td><td><span class="tag s">shares</span>AsyncVault · RedeemRequest</td><td>63,064.06 shares investor → PoolEscrow</td><td class="n">pending</td></tr>
+<tr><td class="n">Aug 14 14:33</td><td><span class="tag h">price</span>Chronicle · Poked</td><td>fresh NAV published</td><td class="n">1.023879</td></tr>
+<tr><td class="n">Aug 14 19:08</td><td><span class="tag p">price</span>BatchRequestManager · ApproveRedeems</td><td>manager approves 23,526.03 of 63,064.06</td><td class="n">epoch 4</td></tr>
+<tr><td class="n">Aug 14 19:35</td><td><span class="tag p">price</span>BatchRequestManager · RevokeShares</td><td>manager passes the price</td><td class="n alert">1.020232 (Aug 4 NAV)</td></tr>
+<tr><td class="n">Aug 14 19:35</td><td><span class="tag s">shares</span>BalanceSheet · Revoke → ShareToken · Transfer to 0x0</td><td>23,526.03 shares burned</td><td class="n">−23,526.03</td></tr>
+<tr><td class="n">Aug 14 19:35</td><td><span class="tag c">cash</span>BalanceSheet · NoteWithdraw</td><td>USDC earmarked in escrow for the payout</td><td class="n">24,002.02</td></tr>
+<tr><td class="n">Aug 18 08:22</td><td><span class="tag c">cash</span>AsyncVault · Withdraw → USDC · Transfer</td><td>escrow → investor</td><td class="n">24,002.02</td></tr>
+</tbody>
+</table>
+<p style="margin-top:12px">The arithmetic holds: 23,526.03 × 1.020232 = 24,002.02. The input was ten days old. At Chronicle's price the payout would have been 24,087.83.</p>
+
+<h2>4. Addresses</h2>
+<table>
+<thead><tr><th>Contract</th><th>Address</th><th>Holds</th></tr></thead>
+<tbody>
+<tr><td>ShareToken ACRDX</td><td class="mono">0x9477724bb54ad5417de8baff29e59df3fb4da74f</td><td><span class="tag s">shares</span></td></tr>
+<tr><td>Spoke</td><td class="mono">0xEC3582fcDc34078a4B7a8c75a5a3AE46f48525aB</td><td><span class="tag p">price</span> reference, per chain</td></tr>
+<tr><td>ShareClassManager (hub)</td><td class="mono">0xaFFC269c8fe18EE9C7DDb22301AC2c2507d69BEf</td><td><span class="tag p">price</span> reference, hub copy</td></tr>
+<tr><td>BatchRequestManager (hub)</td><td class="mono">0xc52bd1bdfa0135147d3f01a0b6d6cd0a831dfe77</td><td><span class="tag p">price</span> execution, per epoch</td></tr>
+<tr><td>Chronicle ACRDX oracle</td><td class="mono">0x9a3bF392f86acd1b1EC07d026B326302eAED7488</td><td><span class="tag h">price</span> independent</td></tr>
+<tr><td>PoolEscrow</td><td class="mono">0x9fb6b4deb5413d17c9169329b00491a05f12218e</td><td><span class="tag c">cash</span> + pending shares</td></tr>
+<tr><td>BalanceSheet</td><td class="mono">0x12a110ce5f0fc871cc72bc7ecaf35cf39dd0f43e</td><td>moves both</td></tr>
+<tr><td>AsyncVault (USDC)</td><td class="mono">0x74A739EA1Dc67c5a0179ebad665D1D3c4b80B712</td><td>investor entry point</td></tr>
+<tr><td>AsyncRequestManager</td><td class="mono">0xf48256abddf96ecddc4b3dbd23e8c1921f9761ae</td><td>per‑investor state</td></tr>
+<tr><td>Hub</td><td class="mono">0xA4A7Bb3831958463b3FE3E27A6a160F764341953</td><td>issuer entry point</td></tr>
+<tr><td>Holdings (hub)</td><td class="mono">0x3f0c8D8d2637881c3f6d8531F51a47c2094C918d</td><td>unused for this pool</td></tr>
+<tr><td>FullRestrictions hook</td><td class="mono">0x423322445818be56F8A317ADEBA0bdB487B71608</td><td>whitelist</td></tr>
+<tr><td>OnOfframpManager</td><td class="mono">0x2e7aaea62a9c2def12b2939e50911b39fc768ca5</td><td><span class="tag c">cash</span> on/off ramp</td></tr>
+</tbody>
+</table>
+<p style="margin-top:12px;color:var(--muted);font-size:13px">poolId 281474976710664 · scId 0x00010000000000080000000000000001 · USDC assetId 5192296858534827628530496329220097</p>
+</main>
