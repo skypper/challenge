@@ -1,0 +1,5 @@
+ENVIRONMENT="mainnet" 
+REGISTRY_VERSION_MAP="" 
+pnpm update-registry;
+pnpm lint;
+pnpm typecheck;

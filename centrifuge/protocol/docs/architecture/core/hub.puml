@@ -1,0 +1,52 @@
+@startuml hub
+title Hub
+hide empty members
+
+skinparam linetype ortho
+
+package "Messaging" <<cloud>> {
+    interface IMessageDispatcher
+    interface IMessageProcessor
+}
+
+class Hub
+class HubHandler
+class Holdings
+class HubRegistry
+class ShareClassManager
+class Accounting
+class StdHubPolicy
+class BridgeCircuitBreaker
+
+interface ISnapshotHook
+interface IBridgingHook
+interface IValuation
+interface IFeeAccrual
+
+class OracleValuation
+class IdentityValuation
+interface IHubPolicy
+interface IHubRequestManager
+
+Hub --> Holdings
+Hub --> HubRegistry
+Hub --> ShareClassManager
+Hub --> Accounting
+Hub --> IMessageDispatcher
+Hub .[dotted].> IFeeAccrual
+Hub .[dotted].> IHubPolicy
+
+HubHandler --> Hub
+IMessageProcessor --> HubHandler
+
+IHubRequestManager --> Hub
+
+Holdings --> IValuation
+OracleValuation -up-|> IValuation
+IdentityValuation -up-|> IValuation
+Holdings .[dotted].> ISnapshotHook
+
+StdHubPolicy -up-|> IHubPolicy
+BridgeCircuitBreaker -up-|> IBridgingHook
+
+@enduml

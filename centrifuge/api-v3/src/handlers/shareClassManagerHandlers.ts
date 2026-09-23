@@ -1,0 +1,203 @@
+import { type Event, type Context } from "ponder:registry";
+import { multiMapper } from "../helpers/multiMapper";
+import { expandInlineObject, logEvent, serviceError } from "../helpers/logger";
+import { TokenService, BlockchainService, PoolService } from "../services";
+import { snapshotter } from "../helpers/snapshotter";
+import { getPeriodStart } from "../helpers/timekeeper";
+import { TokenSnapshot } from "ponder:schema";
+import {
+  approveRedeems,
+  claimDeposit,
+  claimRedeem,
+  issueShares,
+  revokeShares,
+  updateDepositRequest,
+  updateRedeemRequest,
+  approveDeposits,
+} from "./batchRequestManagerHandlers";
+
+multiMapper("shareClassManager:AddShareClass", addShareClassLong);
+multiMapper(
+  "shareClassManager:AddShareClass(uint64 indexed poolId, bytes16 indexed scId, uint32 indexed index, string name, string symbol, bytes32 salt)",
+  addShareClassLong
+);
+/**
+ * Handles the long-form `AddShareClass` event (with name/symbol/salt): resolves share class
+ * decimals, upserts the `Token`, and activates any pending `TokenInstance`s.
+ * @param event - The `AddShareClass` event.
+ * @param context - The Ponder handler context.
+ */
+async function addShareClassLong({
+  event,
+  context,
+}: {
+  event: Event<"shareClassManagerV3_1:AddShareClass">;
+  context: Context;
+}) {
+  logEvent(event, context, "shareClassManager:AddShareClassLong");
+  const { poolId, scId: tokenId, index, name, symbol, salt } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+  const pool = (await PoolService.get(context, {
+    id: poolId,
+  })) as PoolService | null;
+  if (!pool) {
+    return serviceError("Pool not found. Cannot add share class");
+  }
+  const decimals = await PoolService.resolveShareClassDecimalsForInit(context, event, pool);
+  if (decimals === undefined) {
+    return serviceError("Pool decimals is not a initialised", expandInlineObject(pool.read()));
+  }
+
+  const _token = (await TokenService.upsert(
+    context,
+    {
+      id: tokenId,
+      poolId,
+      centrifugeId,
+      name,
+      symbol,
+      salt,
+      decimals,
+      isActive: true,
+      index,
+    },
+    event
+  )) as TokenService;
+
+  await TokenService.activatePendingInstances(context, event, tokenId, decimals);
+}
+
+// SHARE CLASS LIFECYCLE
+multiMapper(
+  "shareClassManager:AddShareClass(uint64 indexed poolId, bytes16 indexed scId, uint32 indexed index)",
+  async ({ event, context }) => {
+    logEvent(event, context, "shareClassManager:AddShareClassShort");
+    const { poolId, scId: tokenId, index } = event.args;
+
+    const centrifugeId = await BlockchainService.getCentrifugeId(context);
+    const pool = (await PoolService.get(context, {
+      id: poolId,
+    })) as PoolService;
+    const decimals = await PoolService.resolveShareClassDecimalsForInit(context, event, pool);
+    if (decimals === undefined) {
+      return serviceError("Pool decimals is not a initialised", expandInlineObject(pool.read()));
+    }
+
+    const _token = (await TokenService.upsert(
+      context,
+      {
+        id: tokenId,
+        poolId,
+        centrifugeId,
+        isActive: true,
+        index,
+        decimals,
+      },
+      event
+    )) as TokenService;
+
+    await TokenService.activatePendingInstances(context, event, tokenId, decimals);
+  }
+);
+
+// INVESTOR TRANSACTIONS
+multiMapper("shareClassManager:UpdateMetadata", async ({ event, context }) => {
+  logEvent(event, context, "shareClassManager:UpdatedMetadata");
+  const { poolId, scId: tokenId, name, symbol } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const token = (await TokenService.get(context, {
+    id: tokenId,
+    poolId,
+    centrifugeId,
+  })) as TokenService | null;
+  if (!token) {
+    return serviceError(`Token not found. Cannot update metadata tokenId=${tokenId}`);
+  }
+  await token.setMetadata(name, symbol);
+  await token.save(event);
+});
+
+multiMapper("shareClassManager:UpdateShareClass", async ({ event, context }) => {
+  logEvent(event, context, "shareClassManager:UpdateShareClass");
+  const { poolId, scId: tokenId, navPoolPerShare: tokenPrice } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const token = (await TokenService.get(context, {
+    id: tokenId,
+    poolId,
+    centrifugeId,
+  })) as TokenService | null;
+  if (!token) {
+    return serviceError(`Token not found. Cannot update share class tokenId=${tokenId}`);
+  }
+  await token.setTokenPrice(tokenPrice);
+  await token.save(event);
+  const asOf = new Date(Number(event.block.timestamp) * 1000);
+  const history = await TokenService.loadTokenSnapshotHistoryForYields(context, [tokenId], asOf);
+  const yields = TokenService.computeYieldsBatch([token], asOf, history);
+  await snapshotter(
+    context,
+    event,
+    "shareClassManagerV3:UpdateShareClass",
+    [token],
+    TokenSnapshot,
+    {
+      augment: (tok) => yields.get(tok.read().id) ?? {},
+    }
+  );
+});
+
+multiMapper("shareClassManager:UpdatePricePoolPerShare", async ({ event, context }) => {
+  logEvent(event, context, "shareClassManager:UpdateShareClass");
+  const { poolId, scId: tokenId, price: tokenPrice, computedAt: computedAtTimestamp } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+  const computedAt = new Date(Number(computedAtTimestamp.toString()) * 1000);
+
+  const token = (await TokenService.get(context, {
+    id: tokenId,
+    poolId,
+    centrifugeId,
+  })) as TokenService | null;
+  if (!token) {
+    return serviceError(`Token not found. Cannot update token price tokenId=${tokenId}`);
+  }
+  await token.setTokenPrice(tokenPrice, computedAt);
+  await token.save(event);
+  const asOf = new Date(Number(event.block.timestamp) * 1000);
+  const history = await TokenService.loadTokenSnapshotHistoryForYields(context, [tokenId], asOf);
+  const yields = TokenService.computeYieldsBatch([token], asOf, history);
+  await snapshotter(
+    context,
+    event,
+    "shareClassManagerV3_1:UpdatePricePoolPerShare",
+    [token],
+    TokenSnapshot,
+    {
+      augment: (tok) => yields.get(tok.read().id) ?? {},
+    }
+  );
+
+  if (getPeriodStart(computedAt).getTime() === getPeriodStart(asOf).getTime()) return;
+
+  await TokenService.recalculateTokenSnapshotYieldsFromTimestamp(
+    context,
+    event,
+    tokenId,
+    computedAt
+  );
+});
+
+multiMapper("shareClassManager:UpdateDepositRequest", updateDepositRequest);
+multiMapper("shareClassManager:UpdateRedeemRequest", updateRedeemRequest);
+multiMapper("shareClassManager:ApproveDeposits", approveDeposits);
+multiMapper("shareClassManager:ApproveRedeems", approveRedeems);
+multiMapper("shareClassManager:IssueShares", issueShares);
+multiMapper("shareClassManager:RevokeShares", revokeShares);
+
+multiMapper("shareClassManager:ClaimDeposit", claimDeposit);
+multiMapper("shareClassManager:ClaimRedeem", claimRedeem);

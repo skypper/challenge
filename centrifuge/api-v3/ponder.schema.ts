@@ -1,0 +1,2192 @@
+import { onchainTable, onchainEnum, relations, primaryKey, index } from "ponder";
+import { getContractNames } from "./src/chains";
+import { TOKEN_YIELD_SPECS, tokenYieldFieldName } from "./src/config/tokenYield";
+import { FIXED_TOKEN_YIELD_COLUMNS } from "./src/helpers/tokenYields";
+import { type NotNull } from "drizzle-orm";
+
+type PgColumnsFunction = Extract<Parameters<typeof onchainTable>[1], Function>;
+type PgColumnsBuilders = Parameters<PgColumnsFunction>[0];
+type PgColumn<T extends keyof PgColumnsBuilders> = ReturnType<PgColumnsBuilders[T]>;
+
+const BlockchainColumns = (t: PgColumnsBuilders) => ({
+  id: t.text().notNull(),
+  centrifugeId: t.text().notNull(),
+  network: t.text().notNull(),
+  lastPeriodStart: t.timestamp(),
+  chainId: t.integer(),
+  name: t.text(),
+  explorer: t.text(),
+  icon: t.text(),
+});
+
+export const Blockchain = onchainTable("blockchain", BlockchainColumns, (t) => ({
+  id: primaryKey({ columns: [t.id] }),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+}));
+
+export const BlockchainRelations = relations(Blockchain, ({ many }) => ({
+  hubPools: many(Pool, { relationName: "pools" }),
+  spokePools: many(PoolSpokeBlockchain, {
+    relationName: "poolSpokeBlockchains",
+  }),
+  tokens: many(Token, { relationName: "tokens" }),
+  tokenInstances: many(TokenInstance, { relationName: "tokenInstances" }),
+  vaults: many(Vault, { relationName: "vaults" }),
+  assets: many(Asset, { relationName: "assets" }),
+  assetRegistrations: many(AssetRegistration, {
+    relationName: "assetRegistrations",
+  }),
+  investorTransactions: many(InvestorTransaction, {
+    relationName: "investorTransactions",
+  }),
+  tokenIssuances: many(TokenIssuance, { relationName: "tokenIssuances" }),
+  holdings: many(Holding, { relationName: "holdings" }),
+  holdingEscrows: many(HoldingEscrow, { relationName: "holdingEscrows" }),
+  escrows: many(Escrow, { relationName: "escrows" }),
+}));
+
+const currentContractFields = (t: PgColumnsBuilders) =>
+  Object.fromEntries(getContractNames().map((contract) => [contract, t.hex()]));
+
+const DeploymentColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.text().notNull(),
+  centrifugeId: t.text().notNull(),
+  globalEscrow: t.hex(),
+  ...currentContractFields(t),
+});
+
+export const Deployment = onchainTable("deployment", DeploymentColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId] }),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+}));
+
+export const DeploymentRelations = relations(Deployment, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Deployment.chainId],
+    references: [Blockchain.id],
+  }),
+}));
+
+const PoolColumns = (t: PgColumnsBuilders) => ({
+  id: t.bigint().notNull(),
+  centrifugeId: t.text().notNull(),
+  isActive: t.boolean().notNull().default(true),
+  currency: t.bigint(),
+  decimals: t.integer().notNull(),
+  metadata: t.text(),
+  name: t.text(),
+  ...defaultColumns(t),
+});
+export const Pool = onchainTable("pool", PoolColumns, (t) => ({
+  id: primaryKey({ columns: [t.id] }),
+  isActiveIdx: index().on(t.isActive),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  centrifugeIdIsActiveIdx: index().on(t.centrifugeId, t.isActive),
+}));
+
+export const PoolRelations = relations(Pool, ({ one, many }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Pool.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  spokeBlockchains: many(PoolSpokeBlockchain, {
+    relationName: "poolSpokeBlockchains",
+  }),
+  asset: one(Asset, {
+    fields: [Pool.currency],
+    references: [Asset.id],
+  }),
+  tokens: many(Token, { relationName: "tokens" }),
+  snapshots: many(PoolSnapshot, { relationName: "snapshots" }),
+  managers: many(PoolManager, { relationName: "managers" }),
+  policies: many(Policy, { relationName: "policies" }),
+  merkleProofManagers: many(MerkleProofManager, {
+    relationName: "merkleProofManagers",
+  }),
+  tokenIssuances: many(TokenIssuance, { relationName: "tokenIssuances" }),
+  poolAdapters: many(PoolAdapter),
+}));
+
+const PoolSpokeBlockchainColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  centrifugeId: t.text().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const PoolSpokeBlockchain = onchainTable(
+  "pool_spoke_blockchain",
+  PoolSpokeBlockchainColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.poolId, t.centrifugeId] }),
+    poolIdx: index().on(t.poolId),
+    centrifugeIdIdx: index().on(t.centrifugeId),
+  })
+);
+
+export const PoolSpokeBlockchainRelations = relations(PoolSpokeBlockchain, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [PoolSpokeBlockchain.poolId],
+    references: [Pool.id],
+  }),
+  blockchain: one(Blockchain, {
+    fields: [PoolSpokeBlockchain.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+}));
+
+const TokenColumns = (t: PgColumnsBuilders) => ({
+  id: t.hex().notNull(),
+  index: t.integer(),
+  isActive: t.boolean().notNull().default(false),
+  centrifugeId: t.text(),
+  poolId: t.bigint().notNull(),
+  decimals: t.integer().notNull(),
+  // Metadata fields
+  name: t.text(),
+  symbol: t.text(),
+  salt: t.text(),
+  // Metrics fields
+  totalIssuance: t.bigint().default(0n),
+  tokenPrice: t.bigint().default(0n),
+  tokenPriceComputedAt: t.timestamp(),
+  ...defaultColumns(t),
+});
+export const Token = onchainTable("token", TokenColumns, (t) => ({
+  id: primaryKey({ columns: [t.id] }),
+  poolIdx: index().on(t.poolId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  centrifugeIdIsActiveIdx: index().on(t.centrifugeId, t.isActive),
+}));
+
+export const TokenRelations = relations(Token, ({ one, many }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Token.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  pool: one(Pool, { fields: [Token.poolId], references: [Pool.id] }),
+  vaults: many(Vault, { relationName: "vaults" }),
+  tokenInstances: many(TokenInstance, { relationName: "tokenInstances" }),
+  investorTransactions: many(InvestorTransaction, {
+    relationName: "investorTransactions",
+  }),
+  tokenIssuances: many(TokenIssuance, { relationName: "tokenIssuances" }),
+  onOffRampManagers: many(OnOffRampManager, {
+    relationName: "onOffRampManagers",
+  }),
+  onRampAssets: many(OnRampAsset, { relationName: "onRampAssets" }),
+  offRampAddresses: many(OffRampAddress, { relationName: "offRampAddresses" }),
+}));
+
+// NOTE: Sync is not supported in the protocol atm, but it is in the enum
+export const VaultKinds = ["Async", "Sync", "SyncDepositAsyncRedeem"] as const;
+export const VaultKind = onchainEnum("vault_kind", VaultKinds);
+export const VaultStatuses = ["LinkInProgress", "UnlinkInProgress", "Linked", "Unlinked"] as const;
+export const VaultStatus = onchainEnum("vault_status", VaultStatuses);
+export const VaultCrosschainInProgressTypes = [`Deploy`, `Link`, `Unlink`, `MaxReserve`] as const;
+export const VaultCrosschainInProgress = onchainEnum(
+  "vault_crosschain_in_progress",
+  VaultCrosschainInProgressTypes
+);
+const VaultColumns = (t: PgColumnsBuilders) => ({
+  id: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  isActive: t.boolean().default(false).notNull(),
+  kind: VaultKind("vault_kind"),
+  status: VaultStatus("vault_status"),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  assetAddress: t.hex(),
+  factory: t.text(),
+  manager: t.text(),
+  maxReserve: t.bigint().default(0n),
+  crosschainInProgress: VaultCrosschainInProgress("vault_crosschain_in_progress"),
+  crosschainInProgressValue: t.bigint(),
+  hubSignalType: VaultCrosschainInProgress("vault_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+export const Vault = onchainTable("vault", VaultColumns, (t) => ({
+  id: primaryKey({ columns: [t.id, t.centrifugeId] }),
+  depositRedeemIdx: index().on(t.tokenId, t.centrifugeId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  tokenIdIdx: index().on(t.tokenId),
+}));
+export const VaultRelations = relations(Vault, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Vault.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  token: one(Token, {
+    fields: [Vault.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [Vault.assetId],
+    references: [Asset.id],
+  }),
+  tokenInstance: one(TokenInstance, {
+    fields: [Vault.tokenId],
+    references: [TokenInstance.tokenId],
+  }),
+}));
+
+export const InvestorTransferLegs = ["OUT", "IN"] as const;
+export const InvestorTransferLeg = onchainEnum("investor_transfer_leg", InvestorTransferLegs);
+
+export const InvestorTransactionType = onchainEnum("investor_transaction_type", [
+  "DEPOSIT_REQUEST_UPDATED",
+  "REDEEM_REQUEST_UPDATED",
+  "DEPOSIT_REQUEST_CANCELLED",
+  "REDEEM_REQUEST_CANCELLED",
+  "DEPOSIT_REQUEST_EXECUTED",
+  "REDEEM_REQUEST_EXECUTED",
+  "DEPOSIT_CLAIMABLE",
+  "REDEEM_CLAIMABLE",
+  "DEPOSIT_CLAIMED",
+  "REDEEM_CLAIMED",
+  "SYNC_DEPOSIT",
+  "SYNC_REDEEM",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+] as const);
+
+const InvestorTransactionColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  type: InvestorTransactionType("investor_transaction_type").notNull(),
+  account: t.hex().notNull(),
+  epochIndex: t.integer(),
+  tokenAmount: t.bigint().default(0n),
+  currencyAmount: t.bigint().default(0n),
+  tokenPrice: t.bigint().default(0n),
+  transactionFee: t.bigint().default(0n),
+  fromAccount: t.hex(),
+  toAccount: t.hex(),
+  fromCentrifugeId: t.text(),
+  toCentrifugeId: t.text(),
+  currencyAssetId: t.bigint(),
+  transferMessageId: t.hex(),
+  transferLeg: InvestorTransferLeg("investor_transfer_leg"),
+  ...defaultColumns(t, false),
+});
+export const InvestorTransaction = onchainTable(
+  "investor_transaction",
+  InvestorTransactionColumns,
+  (t) => ({
+    id: primaryKey({
+      columns: [t.poolId, t.tokenId, t.account, t.type, t.createdAtTxHash],
+    }),
+  })
+);
+
+export const InvestorTransactionRelations = relations(InvestorTransaction, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [InvestorTransaction.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  pool: one(Pool, {
+    fields: [InvestorTransaction.poolId],
+    references: [Pool.id],
+  }),
+  token: one(Token, {
+    fields: [InvestorTransaction.tokenId],
+    references: [Token.id],
+  }),
+  currencyAsset: one(Asset, {
+    fields: [InvestorTransaction.currencyAssetId],
+    references: [Asset.id],
+  }),
+}));
+
+// Direct mints/burns via BalanceSheet.issue()/revoke() (V3_1+). `tokenId` is the
+// share class id (`scId`), consistent with the `Token` entity. Captures every
+// mint/burn — including async- and sync-deposit-driven ones — with the NAV price
+// (only present on the Issue/Revoke events, not on the ERC-20 Transfer). The
+// `isManual` flag isolates issuances NOT driven by the deposit flow (i.e. the
+// caller is neither the async nor the sync request manager).
+export const TokenIssuanceType = onchainEnum("token_issuance_type", ["ISSUE", "REVOKE"] as const);
+
+const TokenIssuanceColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(), // share class id (scId)
+  type: TokenIssuanceType("token_issuance_type").notNull(),
+  sender: t.hex().notNull(), // msgSender() of the issue()/revoke() call — the classifier
+  account: t.hex().notNull(), // `to` for ISSUE, `from` for REVOKE
+  shares: t.bigint().notNull(),
+  pricePoolPerShare: t.bigint().notNull(), // D18 NAV struck at mint/burn
+  isManual: t.boolean().notNull(), // caller is neither the async nor the sync request manager
+  logIndex: t.integer().notNull(),
+  ...defaultColumns(t, false),
+});
+export const TokenIssuance = onchainTable(
+  "token_issuance",
+  TokenIssuanceColumns,
+  (t) => ({
+    // logIndex in the PK guards against multiple issue()/revoke() in one tx
+    id: primaryKey({
+      columns: [t.tokenId, t.centrifugeId, t.type, t.createdAtTxHash, t.logIndex],
+    }),
+    manualIssuanceIdx: index().on(t.centrifugeId, t.poolId, t.isManual, t.createdAtBlock),
+  })
+);
+
+export const TokenIssuanceRelations = relations(TokenIssuance, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [TokenIssuance.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  pool: one(Pool, {
+    fields: [TokenIssuance.poolId],
+    references: [Pool.id],
+  }),
+  token: one(Token, {
+    fields: [TokenIssuance.tokenId],
+    references: [Token.id],
+  }),
+}));
+
+const WhitelistedInvestorColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  accountAddress: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  isFrozen: t.boolean().notNull().default(false),
+  validUntil: t.timestamp(),
+  ...defaultColumns(t),
+});
+
+export const WhitelistedInvestor = onchainTable(
+  "whitelisted_investor",
+  WhitelistedInvestorColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.accountAddress] }),
+    poolIdx: index().on(t.poolId),
+    tokenIdx: index().on(t.tokenId),
+    accountAddressIdx: index().on(t.accountAddress),
+    centrifugeIdIdx: index().on(t.centrifugeId),
+  })
+);
+export const WhitelistedInvestorRelations = relations(WhitelistedInvestor, ({ one }) => ({
+  token: one(Token, {
+    fields: [WhitelistedInvestor.tokenId],
+    references: [Token.id],
+  }),
+  account: one(Account, {
+    fields: [WhitelistedInvestor.accountAddress],
+    references: [Account.address],
+  }),
+}));
+
+const VaultInvestOrderColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  accountAddress: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+
+  requestedAssetsAmount: t.bigint().default(0n),
+  claimableAssetsAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+
+  epochIndex: t.integer(),
+});
+
+export const VaultInvestOrder = onchainTable(
+  "vault_invest_order",
+  VaultInvestOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.assetId, t.accountAddress] }),
+  })
+);
+
+export const VaultInvestOrderRelations = relations(VaultInvestOrder, ({ one }) => ({
+  vault: one(Vault, {
+    fields: [VaultInvestOrder.tokenId, VaultInvestOrder.centrifugeId],
+    references: [Vault.tokenId, Vault.centrifugeId],
+  }),
+}));
+
+const PendingInvestOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  account: t.hex().notNull(),
+
+  pendingAssetsAmount: t.bigint().default(0n),
+  queuedAssetsAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const PendingInvestOrder = onchainTable(
+  "pending_invest_order",
+  PendingInvestOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId, t.account] }),
+    tokenIdAssetIdPendingAmountIdx: index().on(t.tokenId, t.assetId, t.pendingAssetsAmount),
+  })
+);
+
+export const PendingInvestOrderRelations = relations(PendingInvestOrder, ({}) => ({}));
+
+const InvestOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  account: t.hex().notNull(),
+  index: t.integer().notNull(),
+
+  // Approved fields
+  ...timestamperFields(t, "approved"),
+  approvedAssetsAmount: t.bigint().default(0n), // Asset denomination
+
+  // Issued fields
+  issuedSharesAmount: t.bigint().default(0n), // PER USER
+  issuedWithNavPoolPerShare: t.bigint().default(0n),
+  issuedWithNavAssetPerShare: t.bigint().default(0n),
+  ...timestamperFields(t, "issued"),
+
+  // Claimed fields
+  ...timestamperFields(t, "claimed"),
+  claimedSharesAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const InvestOrder = onchainTable("invest_order", InvestOrderColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.assetId, t.account, t.index] }),
+  poolIdx: index().on(t.poolId),
+  tokenIdx: index().on(t.tokenId),
+  assetIdx: index().on(t.assetId),
+  accountIdx: index().on(t.account),
+  tokenIdAssetIdIndexIdx: index().on(t.tokenId, t.assetId, t.index),
+}));
+
+export const InvestOrderRelations = relations(InvestOrder, ({ one }) => ({
+  token: one(Token, {
+    fields: [InvestOrder.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [InvestOrder.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const VaultRedeemOrderColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  accountAddress: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+
+  requestedSharesAmount: t.bigint().default(0n),
+  claimableSharesAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const VaultRedeemOrder = onchainTable(
+  "vault_redeem_order",
+  VaultRedeemOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.assetId, t.accountAddress] }),
+  })
+);
+
+export const VaultRedeemRelations = relations(VaultRedeemOrder, ({ one }) => ({
+  vault: one(Vault, {
+    fields: [VaultRedeemOrder.tokenId, VaultRedeemOrder.centrifugeId],
+    references: [Vault.tokenId, Vault.centrifugeId],
+  }),
+}));
+
+const PendingRedeemOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  account: t.hex().notNull(),
+
+  pendingSharesAmount: t.bigint().default(0n),
+  queuedSharesAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const PendingRedeemOrder = onchainTable(
+  "pending_redeem_order",
+  PendingRedeemOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId, t.account] }),
+    tokenIdAssetIdPendingAmountIdx: index().on(t.tokenId, t.assetId, t.pendingSharesAmount),
+  })
+);
+
+export const PendingRedeemOrderRelations = relations(PendingRedeemOrder, ({}) => ({}));
+
+const RedeemOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  account: t.hex().notNull(),
+  index: t.integer().notNull(),
+
+  // Approved fields
+  ...timestamperFields(t, "approved"),
+  approvedSharesAmount: t.bigint().default(0n), // Share denomination
+
+  // Revoked fields
+  ...timestamperFields(t, "revoked"),
+  revokedSharesAmount: t.bigint().default(0n), // share denomination
+  revokedAssetsAmount: t.bigint().default(0n), // payout of assets for shares, in asset denomination, PER USER
+  revokedPoolAmount: t.bigint().default(0n), // payout of assets for shares, in pool denomination, , PER USER
+  revokedWithNavPoolPerShare: t.bigint().default(0n),
+  revokedWithNavAssetPerShare: t.bigint().default(0n),
+
+  // Claimed fields
+  ...timestamperFields(t, "claimed"),
+  claimedAssetsAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const RedeemOrder = onchainTable("redeem_order", RedeemOrderColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.assetId, t.account, t.index] }),
+  poolIdx: index().on(t.poolId),
+  tokenIdx: index().on(t.tokenId),
+  assetIdx: index().on(t.assetId),
+  accountIdx: index().on(t.account),
+  tokenIdAssetIdIndexIdx: index().on(t.tokenId, t.assetId, t.index),
+}));
+
+export const RedeemOrderRelations = relations(RedeemOrder, ({ one }) => ({
+  token: one(Token, {
+    fields: [RedeemOrder.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [RedeemOrder.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const EpochOutstandingInvestColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+
+  pendingAssetsAmount: t.bigint().default(0n),
+  queuedAssetsAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const EpochOutstandingInvest = onchainTable(
+  "epoch_outstanding_invest",
+  EpochOutstandingInvestColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId] }),
+    poolIdx: index().on(t.poolId),
+    tokenIdx: index().on(t.tokenId),
+    assetIdx: index().on(t.assetId),
+  })
+);
+
+export const EpochOutstandingInvestRelations = relations(EpochOutstandingInvest, ({ one }) => ({
+  token: one(Token, {
+    fields: [EpochOutstandingInvest.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [EpochOutstandingInvest.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const EpochOutstandingRedeemColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+
+  pendingSharesAmount: t.bigint().default(0n),
+  queuedSharesAmount: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const EpochOutstandingRedeem = onchainTable(
+  "epoch_outstanding_redeem",
+  EpochOutstandingRedeemColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId] }),
+    poolIdx: index().on(t.poolId),
+    tokenIdx: index().on(t.tokenId),
+    assetIdx: index().on(t.assetId),
+  })
+);
+
+export const EpochOutstandingRedeemRelations = relations(EpochOutstandingRedeem, ({ one }) => ({
+  token: one(Token, {
+    fields: [EpochOutstandingRedeem.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [EpochOutstandingRedeem.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const EpochInvestOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  index: t.integer().notNull(), // required since multiple entries per combination
+
+  // Approved fields
+  ...timestamperFields(t, "approved"),
+  approvedAssetsAmount: t.bigint().default(0n), // asset denomination
+  approvedPoolAmount: t.bigint().default(0n), // pool denomination
+  approvedPercentageOfTotalPending: t.bigint().default(0n),
+
+  // Closed fields
+  ...timestamperFields(t, "issued"),
+  issuedSharesAmount: t.bigint().default(0n),
+  issuedWithNavPoolPerShare: t.bigint().default(0n),
+  issuedWithNavAssetPerShare: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const EpochInvestOrder = onchainTable(
+  "epoch_invest_order",
+  EpochInvestOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId, t.index] }),
+    poolIdx: index().on(t.poolId),
+    tokenIdx: index().on(t.tokenId),
+    assetIdx: index().on(t.assetId),
+  })
+);
+
+export const EpochInvestOrderRelations = relations(EpochInvestOrder, ({ one }) => ({
+  token: one(Token, {
+    fields: [EpochInvestOrder.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [EpochInvestOrder.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const EpochRedeemOrderColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  index: t.integer().notNull(), // required
+
+  // Approved fields
+  ...timestamperFields(t, "approved"),
+  approvedSharesAmount: t.bigint().default(0n), // asset denomination
+  approvedPercentageOfTotalPending: t.bigint().default(0n), // percentage value as fixed point would be best
+
+  // Closed fields
+  ...timestamperFields(t, "revoked"),
+  revokedSharesAmount: t.bigint().default(0n),
+  revokedAssetsAmount: t.bigint().default(0n), // payout of assets for shares, in asset denomination
+  revokedPoolAmount: t.bigint().default(0n), // payout of assets for shares, in pool denomination
+  revokedWithNavPoolPerShare: t.bigint().default(0n),
+  revokedWithNavAssetPerShare: t.bigint().default(0n),
+
+  ...defaultColumns(t),
+});
+
+export const EpochRedeemOrder = onchainTable(
+  "epoch_redeem_order",
+  EpochRedeemOrderColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.assetId, t.index] }),
+    poolIdx: index().on(t.poolId),
+    tokenIdx: index().on(t.tokenId),
+    assetIdx: index().on(t.assetId),
+  })
+);
+
+export const EpochRedeemOrderRelations = relations(EpochRedeemOrder, ({ one }) => ({
+  token: one(Token, {
+    fields: [EpochRedeemOrder.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [EpochRedeemOrder.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const AssetRegistrationColumns = (t: PgColumnsBuilders) => ({
+  assetId: t.bigint().notNull(),
+  centrifugeId: t.text().notNull(),
+  decimals: t.integer().notNull(),
+  ...defaultColumns(t),
+});
+
+export const AssetRegistration = onchainTable(
+  "asset_registration",
+  AssetRegistrationColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.assetId, t.centrifugeId] }),
+  })
+);
+export const AssetRegistrationRelations = relations(AssetRegistration, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [AssetRegistration.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  asset: one(Asset, {
+    fields: [AssetRegistration.assetId],
+    references: [Asset.id],
+  }),
+}));
+
+const AssetColumns = (t: PgColumnsBuilders) => ({
+  id: t.bigint().notNull(),
+  centrifugeId: t.text(),
+  address: t.hex(),
+  assetTokenId: t.bigint(),
+  decimals: t.integer().notNull(),
+  name: t.text(),
+  symbol: t.text(),
+  ...timestamperFieldsWithChain(t, "registeredOnSpoke"),
+  ...timestamperFieldsWithChain(t, "registeredOnHub"),
+  ...defaultColumns(t),
+});
+
+export const Asset = onchainTable("asset", AssetColumns, (t) => ({
+  id: primaryKey({ columns: [t.id] }),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  addressIdx: index().on(t.address),
+  centrifugeIdAddressIdx: index().on(t.centrifugeId, t.address),
+  centrifugeIdAddressAssetTokenIdIdx: index().on(t.centrifugeId, t.address, t.assetTokenId),
+}));
+export const AssetRelations = relations(Asset, ({ one, many }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Asset.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  assetRegistrations: many(AssetRegistration, {
+    relationName: "assetRegistrations",
+  }),
+}));
+
+export const TokenInstanceCrosschainInProgressTypes = [`NotifySharePrice`, `SetValuation`] as const;
+export const TokenInstanceCrosschainInProgress = onchainEnum(
+  "token_instance_crosschain_in_progress",
+  TokenInstanceCrosschainInProgressTypes
+);
+
+export const TokenInstanceColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  tokenId: t.hex().notNull(),
+  isActive: t.boolean().notNull().default(false),
+  address: t.hex().notNull(),
+  tokenPrice: t.bigint().default(0n),
+  computedAt: t.timestamp(),
+  totalIssuance: t.bigint().default(0n),
+  decimals: t.integer().notNull(),
+  crosschainInProgress: TokenInstanceCrosschainInProgress("token_instance_crosschain_in_progress"),
+  hubSignalType: TokenInstanceCrosschainInProgress("token_instance_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+export const TokenInstance = onchainTable("token_instance", TokenInstanceColumns, (t) => ({
+  id: primaryKey({ columns: [t.centrifugeId, t.tokenId] }),
+  addressIdx: index().on(t.address),
+  addressCentrifugeIdIdx: index().on(t.address, t.centrifugeId),
+  centrifugeIdIsActiveIdx: index().on(t.centrifugeId, t.isActive),
+}));
+export const TokenInstanceRelations = relations(TokenInstance, ({ one, many }) => ({
+  blockchain: one(Blockchain, {
+    fields: [TokenInstance.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  token: one(Token, {
+    fields: [TokenInstance.tokenId],
+    references: [Token.id],
+  }),
+  vaults: many(Vault, { relationName: "vaults" }),
+}));
+
+const HoldingColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  isInitialized: t.boolean().notNull().default(false),
+  isLiability: t.boolean(),
+  valuation: t.text(),
+  assetId: t.bigint().notNull(),
+
+  // Spoke side amounts and values
+  assetQuantity: t.bigint().default(0n),
+  totalValue: t.bigint().default(0n),
+  ...defaultColumns(t),
+});
+
+export const Holding = onchainTable("holding", HoldingColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.assetId] }),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  poolIdx: index().on(t.poolId),
+  tokenIdx: index().on(t.tokenId),
+  assetIdx: index().on(t.assetId),
+}));
+
+export const HoldingsRelations = relations(Holding, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Holding.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  token: one(Token, {
+    fields: [Holding.tokenId],
+    references: [Token.id],
+  }),
+  holdingEscrow: one(HoldingEscrow, {
+    fields: [Holding.tokenId, Holding.assetId],
+    references: [HoldingEscrow.tokenId, HoldingEscrow.assetId],
+  }),
+}));
+
+export const HoldingAccountTypes = [
+  "Asset",
+  "Equity",
+  "Loss",
+  "Gain",
+  "Expense",
+  "Liability",
+] as const;
+export const HoldingAccountType = onchainEnum("holding_account_type", HoldingAccountTypes);
+export const HoldingAccountColumns = (t: PgColumnsBuilders) => ({
+  id: t.text().notNull(),
+  tokenId: t.hex().notNull(),
+  kind: HoldingAccountType("holding_account_type").notNull(),
+  ...defaultColumns(t),
+});
+
+export const HoldingAccount = onchainTable("holding_account", HoldingAccountColumns, (t) => ({
+  id: primaryKey({ columns: [t.id] }),
+}));
+
+export const HoldingAccountRelations = relations(HoldingAccount, ({ one }) => ({
+  holding: one(Holding, {
+    fields: [HoldingAccount.tokenId],
+    references: [Holding.tokenId],
+  }),
+}));
+
+export const EscrowColumns = (t: PgColumnsBuilders) => ({
+  address: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  centrifugeId: t.text().notNull(),
+  ...defaultColumns(t),
+});
+
+export const Escrow = onchainTable("escrow", EscrowColumns, (t) => ({
+  id: primaryKey({ columns: [t.address, t.centrifugeId] }),
+  poolIdx: index().on(t.poolId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  poolCentrifugeCreatedIdx: index().on(t.poolId, t.centrifugeId, t.createdAtBlock),
+}));
+
+export const EscrowRelations = relations(Escrow, ({ one, many }) => ({
+  blockchain: one(Blockchain, {
+    fields: [Escrow.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  holdingEscrows: many(HoldingEscrow, { relationName: "holdingEscrows" }),
+}));
+
+export const HoldingEscrowCrosschainInProgressTypes = [`NotifyAssetPrice`] as const;
+export const HoldingEscrowCrosschainInProgress = onchainEnum(
+  "holding_escrow_crosschain_in_progress",
+  HoldingEscrowCrosschainInProgressTypes
+);
+
+export const HoldingEscrowColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  assetAddress: t.hex().notNull(),
+  assetAmount: t.bigint().default(0n),
+  assetPrice: t.bigint().default(0n),
+  maxAssetPriceAge: t.bigint().default(0n),
+  escrowAddress: t.hex().notNull(),
+  crosschainInProgress: HoldingEscrowCrosschainInProgress("holding_escrow_crosschain_in_progress"),
+  hubSignalType: HoldingEscrowCrosschainInProgress("holding_escrow_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+export const HoldingEscrow = onchainTable("holding_escrow", HoldingEscrowColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.assetId] }),
+  poolIdx: index().on(t.poolId),
+  tokenIdx: index().on(t.tokenId),
+  assetIdx: index().on(t.assetId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  tokenIdAssetAmountIdx: index().on(t.tokenId, t.assetAmount),
+}));
+export const HoldingEscrowRelations = relations(HoldingEscrow, ({ one }) => ({
+  blockchain: one(Blockchain, {
+    fields: [HoldingEscrow.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  holding: one(Holding, {
+    fields: [HoldingEscrow.tokenId, HoldingEscrow.assetId],
+    references: [Holding.tokenId, Holding.assetId],
+  }),
+  asset: one(Asset, {
+    fields: [HoldingEscrow.assetId],
+    references: [Asset.id],
+  }),
+  escrow: one(Escrow, {
+    fields: [HoldingEscrow.escrowAddress, HoldingEscrow.centrifugeId],
+    references: [Escrow.address, Escrow.centrifugeId],
+  }),
+}));
+
+export const PoolManagerCrosschainInProgressTypes = [`CanManage`, `CanNotManage`] as const;
+export const PoolManagerCrosschainInProgress = onchainEnum(
+  "pool_manager_crosschain_in_progress",
+  PoolManagerCrosschainInProgressTypes
+);
+
+const PoolManagerColumns = (t: PgColumnsBuilders) => ({
+  address: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  isHubManager: t.boolean().notNull().default(false),
+  isBalancesheetManager: t.boolean().notNull().default(false),
+  crosschainInProgress: PoolManagerCrosschainInProgress("pool_manager_crosschain_in_progress"),
+  hubSignalType: PoolManagerCrosschainInProgress("pool_manager_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+
+export const PoolManager = onchainTable("pool_manager", PoolManagerColumns, (t) => ({
+  id: primaryKey({ columns: [t.address, t.centrifugeId, t.poolId] }),
+  poolIdx: index().on(t.poolId),
+}));
+
+export const PoolManagerRelations = relations(PoolManager, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [PoolManager.poolId],
+    references: [Pool.id],
+  }),
+}));
+
+const OnOffRampManagerColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  address: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  ...defaultColumns(t),
+});
+
+export const OnOffRampManager = onchainTable(
+  "on_off_ramp_manager",
+  OnOffRampManagerColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.address, t.centrifugeId] }),
+    tokenIdx: index().on(t.tokenId),
+    poolIdx: index().on(t.poolId),
+    centrifugeIdIdx: index().on(t.centrifugeId),
+  })
+);
+
+export const OnOffRampManagerRelations = relations(OnOffRampManager, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [OnOffRampManager.poolId],
+    references: [Pool.id],
+  }),
+  token: one(Token, {
+    fields: [OnOffRampManager.tokenId],
+    references: [Token.id],
+  }),
+}));
+
+export const OfframpRelayerCrosschainInProgressTypes = [`Enabled`, `Disabled`] as const;
+export const OfframpRelayerCrosschainInProgress = onchainEnum(
+  "offramp_relayer_crosschain_in_progress",
+  OfframpRelayerCrosschainInProgressTypes
+);
+
+const OfframpRelayerColumns = (t: PgColumnsBuilders) => ({
+  centrifugeId: t.text().notNull(),
+  tokenId: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  address: t.hex().notNull(),
+  isEnabled: t.boolean().notNull().default(false),
+  crosschainInProgress: OfframpRelayerCrosschainInProgress(
+    "offramp_relayer_crosschain_in_progress"
+  ),
+  hubSignalType: OfframpRelayerCrosschainInProgress("offramp_relayer_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+
+export const OfframpRelayer = onchainTable("offramp_relayer", OfframpRelayerColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.address] }),
+  tokenIdx: index().on(t.tokenId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  addressIdx: index().on(t.address),
+}));
+
+export const OnRampAssetCrosschainInProgressTypes = [`Enabled`, `Disabled`] as const;
+export const OnRampAssetCrosschainInProgress = onchainEnum(
+  "on_ramp_asset_crosschain_in_progress",
+  OnRampAssetCrosschainInProgressTypes
+);
+
+const OnRampAssetColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  assetAddress: t.hex().notNull(),
+  isEnabled: t.boolean().notNull().default(false),
+  crosschainInProgress: OnRampAssetCrosschainInProgress("on_ramp_asset_crosschain_in_progress"),
+  hubSignalType: OnRampAssetCrosschainInProgress("on_ramp_asset_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+
+export const OnRampAsset = onchainTable("on_ramp_asset", OnRampAssetColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.assetAddress] }),
+  tokenIdx: index().on(t.tokenId),
+  assetAddressIdx: index().on(t.assetAddress),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+}));
+
+export const OnRampAssetRelations = relations(OnRampAsset, ({ one }) => ({
+  token: one(Token, {
+    fields: [OnRampAsset.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [OnRampAsset.assetAddress, OnRampAsset.centrifugeId],
+    references: [Asset.address, Asset.centrifugeId],
+  }),
+}));
+
+export const OffRampAddressCrosschainInProgressTypes = [`Enabled`, `Disabled`] as const;
+export const OffRampAddressCrosschainInProgress = onchainEnum(
+  "off_ramp_address_crosschain_in_progress",
+  OffRampAddressCrosschainInProgressTypes
+);
+
+const OffRampAddressColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  assetAddress: t.hex().notNull(),
+  receiverAddress: t.hex().notNull(),
+  isEnabled: t.boolean().default(false),
+  crosschainInProgress: OffRampAddressCrosschainInProgress(
+    "off_ramp_address_crosschain_in_progress"
+  ),
+  hubSignalType: OffRampAddressCrosschainInProgress("off_ramp_address_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+export const OffRampAddress = onchainTable("off_ramp_address", OffRampAddressColumns, (t) => ({
+  id: primaryKey({ columns: [t.tokenId, t.assetAddress, t.receiverAddress] }),
+  poolIdx: index().on(t.poolId),
+  tokenIdx: index().on(t.tokenId),
+  assetIdx: index().on(t.assetAddress),
+  receiverIdx: index().on(t.receiverAddress),
+}));
+
+export const OffRampAddressRelations = relations(OffRampAddress, ({ one }) => ({
+  token: one(Token, {
+    fields: [OffRampAddress.tokenId],
+    references: [Token.id],
+  }),
+  asset: one(Asset, {
+    fields: [OffRampAddress.assetAddress, OffRampAddress.centrifugeId],
+    references: [Asset.address, Asset.centrifugeId],
+  }),
+}));
+
+export const PolicyCrosschainInProgressTypes = [`UpdatePolicy`] as const;
+export const PolicyCrosschainInProgress = onchainEnum(
+  "policy_crosschain_in_progress",
+  PolicyCrosschainInProgressTypes
+);
+
+const PolicyColumns = (t: PgColumnsBuilders) => ({
+  poolId: t.bigint().notNull(),
+  centrifugeId: t.text().notNull(),
+  strategistAddress: t.hex().notNull(),
+  root: t.hex(),
+  crosschainInProgress: PolicyCrosschainInProgress("policy_crosschain_in_progress"),
+  hubSignalType: PolicyCrosschainInProgress("policy_hub_signal_type"),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+
+export const Policy = onchainTable("policy", PolicyColumns, (t) => ({
+  id: primaryKey({ columns: [t.poolId, t.centrifugeId, t.strategistAddress] }),
+  poolIdx: index().on(t.poolId),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  strategistIdx: index().on(t.strategistAddress),
+}));
+
+export const PolicyRelations = relations(Policy, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [Policy.poolId],
+    references: [Pool.id],
+  }),
+}));
+
+export const CrosschainPayloadStatuses = [
+  "Underpaid",
+  "InTransit",
+  "Delivered",
+  "PartiallyFailed",
+  "Completed",
+] as const;
+export const CrosschainPayloadStatus = onchainEnum(
+  "crosschain_payload_status",
+  CrosschainPayloadStatuses
+);
+
+const CrosschainPayloadColumns = (t: PgColumnsBuilders) => ({
+  id: t.hex().notNull(),
+  index: t.integer().notNull().default(0),
+  fromCentrifugeId: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  rawData: t.hex().notNull(),
+  poolId: t.bigint(),
+  tokenId: t.hex(),
+  status: CrosschainPayloadStatus("crosschain_payload_status").notNull(),
+  gasLimit: t.bigint(),
+  gasPrice: t.bigint(),
+  ...timestamperFields(t, "delivered"),
+  ...timestamperFields(t, "completed"),
+  ...timestamperFieldsWithChain(t, "underpaid"),
+  ...timestamperFieldsWithChain(t, "sent"),
+  ...timestamperFieldsWithChain(t, "partiallyFailed"),
+  ...defaultColumns(t, false),
+});
+
+export const CrosschainPayload = onchainTable(
+  "crosschain_payload",
+  CrosschainPayloadColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.id, t.index] }),
+    idIdx: index().on(t.id),
+    indexIdx: index().on(t.index),
+    poolIdIdx: index().on(t.poolId),
+    fromCentrifugeIdIdx: index().on(t.fromCentrifugeId),
+    toCentrifugeIdIdx: index().on(t.toCentrifugeId),
+    statusIdx: index().on(t.status),
+    idIndexIdx: index().on(t.id, t.index),
+  })
+);
+
+export const CrosschainPayloadRelations = relations(CrosschainPayload, ({ one, many }) => ({
+  fromBlockchain: one(Blockchain, {
+    fields: [CrosschainPayload.fromCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  toBlockchain: one(Blockchain, {
+    fields: [CrosschainPayload.toCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  crosschainMessages: many(CrosschainMessage, {
+    relationName: "crosschainMessages",
+  }),
+  pool: one(Pool, {
+    fields: [CrosschainPayload.poolId],
+    references: [Pool.id],
+  }),
+  token: one(Token, {
+    fields: [CrosschainPayload.tokenId],
+    references: [Token.id],
+  }),
+  adapterParticipations: many(AdapterParticipation, {
+    relationName: "adapterParticipations",
+  }),
+}));
+
+export const CrosschainMessageStatuses = [
+  "Unsent",
+  "AwaitingBatchDelivery",
+  "Failed",
+  "Executed",
+] as const;
+export const CrosschainMessageStatus = onchainEnum(
+  "crosschain_message_status",
+  CrosschainMessageStatuses
+);
+
+const CrosschainMessageColumns = (t: PgColumnsBuilders) => ({
+  id: t.hex().notNull(),
+  index: t.integer().notNull().default(0),
+  poolId: t.bigint(),
+  tokenId: t.hex(),
+  payloadId: t.hex(),
+  payloadIndex: t.integer(),
+  messageType: t.text().notNull(),
+  status: CrosschainMessageStatus("crosschain_message_status").notNull(),
+  hash: t.hex().notNull(),
+  rawData: t.hex().notNull(),
+  data: t.jsonb(),
+  failReason: t.hex(),
+  fromCentrifugeId: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  ...timestamperFields(t, "executed"),
+  executedAtChainId: t.integer(),
+  ...timestamperFieldsWithChain(t, "prepared"),
+  ...timestamperFieldsWithChain(t, "failed"),
+  ...defaultColumns(t, false),
+});
+
+export const CrosschainMessage = onchainTable(
+  "crosschain_message",
+  CrosschainMessageColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.id, t.index] }),
+    idIdx: index().on(t.id),
+    indexIdx: index().on(t.index),
+    payloadIdx: index().on(t.payloadId),
+    poolIdx: index().on(t.poolId),
+    statusIdx: index().on(t.status),
+    payloadIdPayloadIndexIdx: index().on(t.payloadId, t.payloadIndex),
+    payloadExecutedIdx: index().on(t.payloadId, t.payloadIndex, t.executedAt),
+    idIndexIdx: index().on(t.id, t.index),
+  })
+);
+
+export const CrosschainMessageRelations = relations(CrosschainMessage, ({ one }) => ({
+  crosschainPayload: one(CrosschainPayload, {
+    fields: [CrosschainMessage.payloadId, CrosschainMessage.payloadIndex],
+    references: [CrosschainPayload.id, CrosschainPayload.index],
+  }),
+  pool: one(Pool, {
+    fields: [CrosschainMessage.poolId],
+    references: [Pool.id],
+  }),
+  token: one(Token, {
+    fields: [CrosschainMessage.tokenId],
+    references: [Token.id],
+  }),
+  fromBlockchain: one(Blockchain, {
+    fields: [CrosschainMessage.fromCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  toBlockchain: one(Blockchain, {
+    fields: [CrosschainMessage.toCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+}));
+
+export const CrosschainMessageQueueStatuses = ["execute", "fail"] as const;
+export const CrosschainMessageQueueStatus = onchainEnum(
+  "crosschain_message_queue_status",
+  CrosschainMessageQueueStatuses
+);
+
+const CrosschainMessageQueueColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  transactionHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  status: CrosschainMessageQueueStatus("crosschain_message_queue_status").notNull(),
+  messageId: t.hex().notNull(),
+  hash: t.hex().notNull(),
+  fromCentrifugeId: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  failReason: t.hex(),
+  rawData: t.hex().notNull(),
+  receivedAt: t.timestamp().notNull(),
+  receivedAtBlock: t.integer().notNull(),
+  receivedAtChainId: t.integer().notNull(),
+  receivedAtTxHash: t.hex().notNull(),
+});
+
+export const CrosschainMessageQueue = onchainTable(
+  "crosschain_message_queue",
+  CrosschainMessageQueueColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.chainId, t.transactionHash, t.logIndex] }),
+    messageIdFifoIdx: index().on(t.messageId, t.receivedAtBlock, t.receivedAt),
+  })
+);
+
+export const CrosschainPayloadQueueTypes = ["PAYLOAD", "PROOF"] as const;
+export const CrosschainPayloadQueueType = onchainEnum(
+  "crosschain_payload_queue_type",
+  CrosschainPayloadQueueTypes
+);
+
+const CrosschainPayloadQueueColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  transactionHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  type: CrosschainPayloadQueueType("crosschain_payload_queue_type").notNull(),
+  payloadId: t.hex().notNull(),
+  adapterId: t.text().notNull(),
+  fromCentrifugeId: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  receivedAt: t.timestamp().notNull(),
+  receivedAtBlock: t.integer().notNull(),
+  receivedAtChainId: t.integer().notNull(),
+  receivedAtTxHash: t.hex().notNull(),
+});
+
+export const CrosschainPayloadQueue = onchainTable(
+  "crosschain_payload_queue",
+  CrosschainPayloadQueueColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.chainId, t.transactionHash, t.logIndex] }),
+    payloadIdFifoIdx: index().on(t.payloadId, t.receivedAtBlock, t.receivedAt),
+  })
+);
+
+const AdapterColumns = (t: PgColumnsBuilders) => ({
+  address: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  name: t.text(),
+  ...defaultColumns(t, false),
+});
+
+export const Adapter = onchainTable("adapter", AdapterColumns, (t) => ({
+  id: primaryKey({ columns: [t.address, t.centrifugeId] }),
+  centrifugeIdIdx: index().on(t.centrifugeId),
+  addressIdx: index().on(t.address),
+}));
+
+export const AdapterRelations = relations(Adapter, ({ many }) => ({
+  adapterWirings: many(AdapterWiring, {
+    relationName: "adapterWirings",
+  }),
+  poolAdapters: many(PoolAdapter),
+}));
+
+const AdapterWiringColumns = (t: PgColumnsBuilders) => ({
+  fromAddress: t.text().notNull(),
+  fromCentrifugeId: t.text().notNull(),
+  toAddress: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  pendingRemoteAdapter: t.hex(),
+  ...timestamperFieldsWithChain(t, "wired"),
+  ...defaultColumns(t, false),
+});
+export const AdapterWiring = onchainTable("adapter_wiring", AdapterWiringColumns, (t) => ({
+  id: primaryKey({
+    columns: [t.fromAddress, t.fromCentrifugeId, t.toAddress, t.toCentrifugeId],
+  }),
+}));
+
+export const AdapterWiringRelations = relations(AdapterWiring, ({ one }) => ({
+  fromAdapter: one(Adapter, {
+    fields: [AdapterWiring.fromAddress, AdapterWiring.fromCentrifugeId],
+    references: [Adapter.address, Adapter.centrifugeId],
+  }),
+  toAdapter: one(Adapter, {
+    fields: [AdapterWiring.toAddress, AdapterWiring.toCentrifugeId],
+    references: [Adapter.address, Adapter.centrifugeId],
+  }),
+}));
+
+export const PoolAdapterCrosschainInProgressTypes = [`Enabled`, `Disabled`] as const;
+export const PoolAdapterCrosschainInProgress = onchainEnum(
+  "pool_adapter_crosschain_in_progress",
+  PoolAdapterCrosschainInProgressTypes
+);
+
+const PoolAdapterColumns = (t: PgColumnsBuilders) => ({
+  localCentrifugeId: t.text().notNull(),
+  remoteCentrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  adapterAddress: t.hex().notNull(),
+  isEnabled: t.boolean().notNull().default(false),
+  crosschainInProgress: PoolAdapterCrosschainInProgress("pool_adapter_crosschain_in_progress"),
+  hubSignalType: PoolAdapterCrosschainInProgress("pool_adapter_hub_signal_type"),
+  hubSignalCancelledAt: t.timestamp(),
+  ...timestamperFieldsWithChain(t, "hubSignal"),
+  ...timestamperFieldsWithChain(t, "spokeAck"),
+  ...defaultColumns(t),
+});
+
+export const PoolAdapter = onchainTable("pool_adapter", PoolAdapterColumns, (t) => ({
+  id: primaryKey({
+    columns: [t.localCentrifugeId, t.remoteCentrifugeId, t.poolId, t.adapterAddress],
+  }),
+  poolIdx: index().on(t.poolId),
+  adapterAddressIdx: index().on(t.adapterAddress),
+  localCentrifugeIdIdx: index().on(t.localCentrifugeId),
+  remoteCentrifugeIdIdx: index().on(t.remoteCentrifugeId),
+  isEnabledIdx: index().on(t.isEnabled),
+  crosschainInProgressIdx: index().on(t.crosschainInProgress),
+}));
+
+export const PoolAdapterRelations = relations(PoolAdapter, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [PoolAdapter.poolId],
+    references: [Pool.id],
+  }),
+  adapter: one(Adapter, {
+    fields: [PoolAdapter.adapterAddress, PoolAdapter.localCentrifugeId],
+    references: [Adapter.address, Adapter.centrifugeId],
+  }),
+  localBlockchain: one(Blockchain, {
+    fields: [PoolAdapter.localCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  remoteBlockchain: one(Blockchain, {
+    fields: [PoolAdapter.remoteCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+}));
+
+export const AdapterParticipationTypes = ["PAYLOAD", "PROOF"] as const;
+export const AdapterParticipationType = onchainEnum(
+  "adapter_participation_type",
+  AdapterParticipationTypes
+);
+export const AdapterParticipationSides = ["SEND", "HANDLE"] as const;
+export const AdapterParticipationSide = onchainEnum(
+  "adapter_participation_side",
+  AdapterParticipationSides
+);
+
+const AdapterParticipationColumns = (t: PgColumnsBuilders) => ({
+  payloadId: t.text().notNull(),
+  payloadIndex: t.integer().notNull(),
+  adapterId: t.text().notNull(),
+  centrifugeId: t.text().notNull(),
+  fromCentrifugeId: t.text().notNull(),
+  toCentrifugeId: t.text().notNull(),
+  type: AdapterParticipationType("adapter_participation_type").notNull(),
+  side: AdapterParticipationSide("adapter_participation_side").notNull(),
+  gasPaid: t.bigint(),
+  timestamp: t.timestamp().notNull(),
+  blockNumber: t.integer().notNull(),
+  transactionHash: t.text().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const AdapterParticipation = onchainTable(
+  "adapter_participation",
+  AdapterParticipationColumns,
+  (t) => ({
+    id: primaryKey({
+      columns: [t.payloadId, t.payloadIndex, t.adapterId, t.side, t.type],
+    }),
+    payloadIdIdx: index().on(t.payloadId),
+    payloadIndexIdx: index().on(t.payloadIndex),
+    payloadIdPayloadIndexIdx: index().on(t.payloadId, t.payloadIndex),
+    adapterIdIdx: index().on(t.adapterId),
+    centrifugeIdIdx: index().on(t.centrifugeId),
+    fromCentrifugeIdIdx: index().on(t.fromCentrifugeId),
+    toCentrifugeIdIdx: index().on(t.toCentrifugeId),
+    sideIdx: index().on(t.side),
+    typeIdx: index().on(t.type),
+  })
+);
+
+export const AdapterParticipationRelations = relations(AdapterParticipation, ({ one }) => ({
+  payload: one(CrosschainPayload, {
+    fields: [AdapterParticipation.payloadId, AdapterParticipation.payloadIndex],
+    references: [CrosschainPayload.id, CrosschainPayload.index],
+  }),
+  adapter: one(Adapter, {
+    fields: [AdapterParticipation.adapterId, AdapterParticipation.centrifugeId],
+    references: [Adapter.address, Adapter.centrifugeId],
+  }),
+  centrifugeBlockchain: one(Blockchain, {
+    fields: [AdapterParticipation.centrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  fromBlockchain: one(Blockchain, {
+    fields: [AdapterParticipation.fromCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+  toBlockchain: one(Blockchain, {
+    fields: [AdapterParticipation.toCentrifugeId],
+    references: [Blockchain.centrifugeId],
+  }),
+}));
+
+// Snapshots
+export const PoolSnapshot = onchainTable(
+  "pool_snapshot",
+  snapshotColumns(PoolColumns, ["id", "currency"] as const),
+  (t) => ({
+    id: primaryKey({ columns: [t.id, t.blockNumber, t.trigger] }),
+  })
+);
+export const PoolSnapshotRelations = relations(PoolSnapshot, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [PoolSnapshot.id],
+    references: [Pool.id],
+  }),
+}));
+
+/** Dynamic TokenSnapshot yield bigint columns derived from configured yield specs. */
+function tokenYieldSnapshotColumns(t: PgColumnsBuilders) {
+  const cols: Record<string, ReturnType<PgColumnsBuilders["bigint"]>> = {};
+  for (const spec of TOKEN_YIELD_SPECS) {
+    cols[tokenYieldFieldName(spec)] = t.bigint();
+  }
+  for (const name of FIXED_TOKEN_YIELD_COLUMNS) {
+    cols[name] = t.bigint();
+  }
+  return cols;
+}
+
+export const TokenSnapshot = onchainTable(
+  "token_snapshot",
+  (t) => ({
+    ...snapshotColumns(TokenColumns, [
+      "id",
+      "tokenPrice",
+      "totalIssuance",
+      "tokenPriceComputedAt",
+    ] as const)(t),
+    ...tokenYieldSnapshotColumns(t),
+  }),
+  (t) => ({
+    id: primaryKey({ columns: [t.id, t.blockNumber, t.trigger] }),
+    tokenIdTimestampIdx: index().on(t.id, t.timestamp),
+  })
+);
+
+export const TokenInstanceSnapshot = onchainTable(
+  "token_instance_snapshot",
+  snapshotColumns(TokenInstanceColumns, [
+    "tokenId",
+    "centrifugeId",
+    "tokenPrice",
+    "totalIssuance",
+  ] as const),
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.blockNumber, t.trigger] }),
+  })
+);
+
+export const HoldingSnapshot = onchainTable(
+  "holding_snapshot",
+  snapshotColumns(HoldingColumns, ["tokenId", "assetId", "assetQuantity", "totalValue"] as const),
+  (t) => ({
+    id: primaryKey({
+      columns: [t.tokenId, t.assetId, t.blockNumber, t.trigger],
+    }),
+  })
+);
+
+export const HoldingEscrowSnapshot = onchainTable(
+  "holding_escrow_snapshot",
+  snapshotColumns(HoldingEscrowColumns, [
+    "tokenId",
+    "assetId",
+    "assetAmount",
+    "assetPrice",
+    "maxAssetPriceAge",
+  ] as const),
+  (t) => ({
+    id: primaryKey({
+      columns: [t.tokenId, t.assetId, t.blockNumber, t.trigger],
+    }),
+  })
+);
+
+const AccountColumns = (t: PgColumnsBuilders) => ({
+  address: t.hex().notNull(),
+  ...defaultColumns(t),
+});
+export const Account = onchainTable("account", AccountColumns, (t) => ({
+  id: primaryKey({ columns: [t.address] }),
+  addressIdx: index().on(t.address),
+}));
+export const AccountRelations = relations(Account, ({}) => ({}));
+
+const SmartContractColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  address: t.hex().notNull(),
+  ...defaultColumns(t),
+});
+
+export const SmartContract = onchainTable("smart_contract", SmartContractColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.address] }),
+  chainIdIdx: index().on(t.chainId),
+  addressIdx: index().on(t.address),
+}));
+
+export const SmartContractRelations = relations(SmartContract, ({ many }) => ({
+  wardsGranted: many(SmartContractWard, { relationName: "smartContractWardsGranted" }),
+  wardsReceived: many(SmartContractWard, { relationName: "smartContractWardsReceived" }),
+}));
+
+const SmartContractWardColumns = (t: PgColumnsBuilders) => ({
+  fromChainId: t.integer().notNull(),
+  fromAddress: t.hex().notNull(),
+  toChainId: t.integer().notNull(),
+  toAddress: t.hex().notNull(),
+  isActive: t.boolean().notNull().default(false),
+  ...defaultColumns(t),
+});
+
+export const SmartContractWard = onchainTable(
+  "smart_contract_ward",
+  SmartContractWardColumns,
+  (t) => ({
+    id: primaryKey({
+      columns: [t.fromChainId, t.fromAddress, t.toChainId, t.toAddress],
+    }),
+    fromContractIdx: index().on(t.fromChainId, t.fromAddress),
+    toContractIdx: index().on(t.toChainId, t.toAddress),
+    isActiveIdx: index().on(t.isActive),
+  })
+);
+
+export const SmartContractWardRelations = relations(SmartContractWard, ({ one }) => ({
+  from: one(SmartContract, {
+    fields: [SmartContractWard.fromChainId, SmartContractWard.fromAddress],
+    references: [SmartContract.chainId, SmartContract.address],
+    relationName: "smartContractWardsGranted",
+  }),
+  to: one(SmartContract, {
+    fields: [SmartContractWard.toChainId, SmartContractWard.toAddress],
+    references: [SmartContract.chainId, SmartContract.address],
+    relationName: "smartContractWardsReceived",
+  }),
+}));
+
+const TokenInstancePositionColumns = (t: PgColumnsBuilders) => ({
+  tokenId: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  accountAddress: t.hex().notNull(),
+  balance: t.bigint().default(0n),
+  tokenPriceAtLastChange: t.bigint(),
+  cumulativeEarnings: t.bigint().notNull().default(0n),
+  costBasis: t.bigint().notNull().default(0n),
+  cumulativeRealizedPnl: t.bigint().notNull().default(0n),
+  isFrozen: t.boolean().notNull().default(false), //TODO: Deprecate this column
+  ...defaultColumns(t),
+});
+
+export const TokenInstancePosition = onchainTable(
+  "token_instance_position",
+  TokenInstancePositionColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.tokenId, t.centrifugeId, t.accountAddress] }),
+    tokenIdx: index().on(t.tokenId),
+    centrifugeIdIdx: index().on(t.centrifugeId),
+    accountIdx: index().on(t.accountAddress),
+  })
+);
+
+export const TokenInstancePositionRelations = relations(TokenInstancePosition, ({ one }) => ({
+  tokenInstance: one(TokenInstance, {
+    fields: [TokenInstancePosition.tokenId, TokenInstancePosition.centrifugeId],
+    references: [TokenInstance.tokenId, TokenInstance.centrifugeId],
+  }),
+  account: one(Account, {
+    fields: [TokenInstancePosition.accountAddress],
+    references: [Account.address],
+  }),
+}));
+
+/** Immutable per-transfer investor accounting checkpoints on a token instance. */
+const InvestorPositionCheckpointColumns = (t: PgColumnsBuilders) => ({
+  tokenId: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  accountAddress: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  balanceBefore: t.bigint().notNull(),
+  balanceAfter: t.bigint().notNull(),
+  tokenPrice: t.bigint(),
+  periodEarnings: t.bigint(),
+  cumulativeEarnings: t.bigint().notNull().default(0n),
+  costBasisBefore: t.bigint().notNull().default(0n),
+  costBasisAfter: t.bigint().notNull().default(0n),
+  realizedPnl: t.bigint(),
+  cumulativeRealizedPnl: t.bigint().notNull().default(0n),
+  trigger: t.text().notNull(),
+  logIndex: t.integer().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const InvestorPositionCheckpoint = onchainTable(
+  "investor_position_checkpoint",
+  InvestorPositionCheckpointColumns,
+  (t) => ({
+    id: primaryKey({
+      columns: [t.tokenId, t.centrifugeId, t.accountAddress, t.createdAtBlock, t.logIndex],
+    }),
+    accountTokenCreatedAtIdx: index().on(t.accountAddress, t.tokenId, t.centrifugeId, t.createdAt),
+  })
+);
+
+export const InvestorPositionCheckpointRelations = relations(
+  InvestorPositionCheckpoint,
+  ({ one }) => ({
+    tokenInstance: one(TokenInstance, {
+      fields: [InvestorPositionCheckpoint.tokenId, InvestorPositionCheckpoint.centrifugeId],
+      references: [TokenInstance.tokenId, TokenInstance.centrifugeId],
+    }),
+    account: one(Account, {
+      fields: [InvestorPositionCheckpoint.accountAddress],
+      references: [Account.address],
+    }),
+    pool: one(Pool, {
+      fields: [InvestorPositionCheckpoint.poolId],
+      references: [Pool.id],
+    }),
+  })
+);
+
+const MerkleProofManagerColumns = (t: PgColumnsBuilders) => ({
+  address: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  ...defaultColumns(t),
+});
+export const MerkleProofManager = onchainTable(
+  "merkle_proof_manager",
+  MerkleProofManagerColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.address, t.centrifugeId] }),
+  })
+);
+export const MerkleProofManagerRelations = relations(MerkleProofManager, ({ one }) => ({
+  pool: one(Pool, {
+    fields: [MerkleProofManager.poolId],
+    references: [Pool.id],
+  }),
+}));
+
+export const BasinSwapDirection = onchainEnum("basin_swap_direction", [
+  "CREDIT_TO_COLLATERAL",
+  "CREDIT_TO_SWAP",
+  "COLLATERAL_TO_CREDIT",
+  "SWAP_TO_CREDIT",
+  "OTHER",
+] as const);
+
+export const BasinRedeemRequestState = onchainEnum("basin_redeem_request_state", [
+  "INITIATED",
+  "COMPLETED",
+] as const);
+
+export const BasinReconciliationWarningType = onchainEnum("basin_reconciliation_warning_type", [
+  "completeOrphan",
+  "redeemOrderLinkAmbiguous",
+  "spokeRedeemLinkAmbiguous",
+  "repaymentClaimMissing",
+] as const);
+
+export const BasinDebtChangeType = onchainEnum("basin_debt_change_type", [
+  "SWAP_PAYOUT",
+  "SWAP_REPAYMENT",
+  "REDEMPTION",
+  "TRANSFER_REPAYMENT",
+  "RATE_UPDATE",
+] as const);
+
+export const BasinFeeType = onchainEnum("basin_fee_type", ["PURCHASE", "REDEMPTION"] as const);
+
+const BasinSwapColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  txHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  basinAddress: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  direction: BasinSwapDirection("basin_swap_direction").notNull(),
+  assetIn: t.hex().notNull(),
+  assetOut: t.hex().notNull(),
+  amountIn: t.bigint().notNull(),
+  amountOut: t.bigint().notNull(),
+  // Swap fee charged on the `assetOut` side (assetOut token units); `amountOut` is net of it.
+  // Derived as gross oracle quote minus `amountOut`; null when the quote eth_call failed or the
+  // asset pair is not a recognized basin leg.
+  fee: t.bigint(),
+  // Fee rate (bps, 1e4 denominator) in force at execution: purchase fee when `assetOut` is the
+  // credit token, redemption fee otherwise. Null when the pair is not a recognized basin leg.
+  feeBps: t.bigint(),
+  sender: t.hex().notNull(),
+  receiver: t.hex().notNull(),
+  blockNumber: t.integer().notNull(),
+  timestamp: t.timestamp().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const BasinSwap = onchainTable("basin_swap", BasinSwapColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.txHash, t.logIndex] }),
+  basinTimestampIdx: index().on(t.basinAddress, t.timestamp),
+}));
+
+const BasinRedeemRequestColumns = (t: PgColumnsBuilders) => ({
+  basinAddress: t.hex().notNull(),
+  requestId: t.hex().notNull(),
+  centrifugeId: t.text().notNull(),
+  poolId: t.bigint().notNull(),
+  tokenId: t.hex().notNull(),
+  assetId: t.bigint().notNull(),
+  redeemer: t.hex().notNull(),
+  creditTokenAmount: t.bigint().notNull(),
+  collateralTokenAmountQuoted: t.bigint().notNull(),
+  state: BasinRedeemRequestState("basin_redeem_request_state").notNull(),
+  ...timestamperFields(t, "initiated", true),
+  ...timestamperFields(t, "completed", false),
+  ...timestamperFields(t, "spokeRedeemRequested", false),
+  collateralTokenReturned: t.bigint(),
+  linkedRedeemOrderIndex: t.integer(),
+  ...defaultColumns(t),
+});
+
+export const BasinRedeemRequest = onchainTable(
+  "basin_redeem_request",
+  BasinRedeemRequestColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.basinAddress, t.requestId] }),
+    redeemerStateIdx: index().on(t.basinAddress, t.redeemer, t.state),
+  })
+);
+
+const BasinReconciliationWarningColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  txHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  type: BasinReconciliationWarningType("basin_reconciliation_warning_type").notNull(),
+  message: t.text().notNull(),
+  basinAddress: t.hex(),
+  basinRedeemRequestId: t.hex(),
+  blockNumber: t.integer().notNull(),
+  timestamp: t.timestamp().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const BasinReconciliationWarning = onchainTable(
+  "basin_reconciliation_warning",
+  BasinReconciliationWarningColumns,
+  (t) => ({
+    id: primaryKey({ columns: [t.chainId, t.txHash, t.logIndex] }),
+  })
+);
+
+export const BasinRedeemRequestRelations = relations(BasinRedeemRequest, ({ one }) => ({
+  vaultRedeemOrder: one(VaultRedeemOrder, {
+    fields: [
+      BasinRedeemRequest.tokenId,
+      BasinRedeemRequest.centrifugeId,
+      BasinRedeemRequest.assetId,
+      BasinRedeemRequest.redeemer,
+    ],
+    references: [
+      VaultRedeemOrder.tokenId,
+      VaultRedeemOrder.centrifugeId,
+      VaultRedeemOrder.assetId,
+      VaultRedeemOrder.accountAddress,
+    ],
+  }),
+  pendingRedeemOrder: one(PendingRedeemOrder, {
+    fields: [BasinRedeemRequest.tokenId, BasinRedeemRequest.assetId, BasinRedeemRequest.redeemer],
+    references: [
+      PendingRedeemOrder.tokenId,
+      PendingRedeemOrder.assetId,
+      PendingRedeemOrder.account,
+    ],
+  }),
+  redeemOrder: one(RedeemOrder, {
+    fields: [
+      BasinRedeemRequest.tokenId,
+      BasinRedeemRequest.assetId,
+      BasinRedeemRequest.redeemer,
+      BasinRedeemRequest.linkedRedeemOrderIndex,
+    ],
+    references: [RedeemOrder.tokenId, RedeemOrder.assetId, RedeemOrder.account, RedeemOrder.index],
+  }),
+}));
+
+const BasinDebtColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  basinAddress: t.hex().notNull(),
+  tokenId: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  // Outstanding CFGL debt toward Grove, normalized to 18 decimals (USD). Signed:
+  // over-repayment drives it negative; interest only accrues while positive.
+  debt: t.bigint().notNull(),
+  // Raw sUSDS `ssr` per-second compounding factor (Ray, 1e27).
+  ssrPerSecondRay: t.bigint().notNull(),
+  // Effective per-second factor: ssr x 30 bps spread factor (Ray).
+  ratePerSecondRay: t.bigint().notNull(),
+  spreadBps: t.integer().notNull(),
+  // Basin's live credit token (JTRSY) balance; the max a new redemption can be requested for.
+  creditTokenBalance: t.bigint().notNull(),
+  // Credit tokens in flight through initiated-but-uncompleted redemptions.
+  pendingCreditTokenAmount: t.bigint().notNull(),
+  // Debt accrual anchor: interest compounds from here at `ratePerSecondRay` on read.
+  lastUpdatedAt: t.timestamp().notNull(),
+  lastUpdatedAtBlock: t.integer().notNull(),
+  ...defaultColumns(t),
+});
+
+export const BasinDebt = onchainTable("basin_debt", BasinDebtColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.basinAddress, t.tokenId] }),
+}));
+
+const BasinDebtChangeColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  txHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  basinAddress: t.hex().notNull(),
+  tokenId: t.hex().notNull(),
+  type: BasinDebtChangeType("basin_debt_change_type").notNull(),
+  // Interest applied in this update for the elapsed time since the previous change (18 decimals).
+  interestAccrued: t.bigint().notNull(),
+  // Signed principal effect: positive for payouts (drawdowns), negative for repayments (18 decimals).
+  principalDelta: t.bigint().notNull(),
+  debtAfter: t.bigint().notNull(),
+  // Effective per-second rate in force after this change (Ray).
+  ratePerSecondRay: t.bigint().notNull(),
+  blockNumber: t.integer().notNull(),
+  timestamp: t.timestamp().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const BasinDebtChange = onchainTable("basin_debt_change", BasinDebtChangeColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.txHash, t.logIndex] }),
+  basinTimestampIdx: index().on(t.basinAddress, t.tokenId, t.timestamp),
+}));
+
+export const BasinDebtChangeRelations = relations(BasinDebtChange, ({ one }) => ({
+  basinDebt: one(BasinDebt, {
+    fields: [BasinDebtChange.chainId, BasinDebtChange.basinAddress, BasinDebtChange.tokenId],
+    references: [BasinDebt.chainId, BasinDebt.basinAddress, BasinDebt.tokenId],
+  }),
+}));
+
+export const BasinDebtRelations = relations(BasinDebt, ({ many }) => ({
+  changes: many(BasinDebtChange),
+}));
+
+const BasinFeeColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  basinAddress: t.hex().notNull(),
+  tokenId: t.hex().notNull(),
+  poolId: t.bigint().notNull(),
+  // Current swap fee rates in basis points (1e4 denominator), maintained from
+  // PurchaseFeeSet / RedemptionFeeSet and seeded from the contract views on first touch.
+  purchaseFeeBps: t.bigint().notNull(),
+  redemptionFeeBps: t.bigint().notNull(),
+  // Admin bounds both rates must stay within (FeeBoundsSet).
+  minFeeBps: t.bigint().notNull(),
+  maxFeeBps: t.bigint().notNull(),
+  // Cumulative swap fees collected, denominated in the fee token (fees are charged on the
+  // assetOut side, so one counter per basin leg). Aggregates of `basin_swap.fee`, maintained
+  // per swap so the "fees collected" KPI is a single-row read.
+  feesCollectedCredit: t.bigint().notNull(),
+  feesCollectedCollateral: t.bigint().notNull(),
+  feesCollectedSwap: t.bigint().notNull(),
+  lastUpdatedAt: t.timestamp().notNull(),
+  lastUpdatedAtBlock: t.integer().notNull(),
+  ...defaultColumns(t),
+});
+
+export const BasinFee = onchainTable("basin_fee", BasinFeeColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.basinAddress, t.tokenId] }),
+}));
+
+const BasinFeeChangeColumns = (t: PgColumnsBuilders) => ({
+  chainId: t.integer().notNull(),
+  txHash: t.hex().notNull(),
+  logIndex: t.integer().notNull(),
+  basinAddress: t.hex().notNull(),
+  tokenId: t.hex().notNull(),
+  feeType: BasinFeeType("basin_fee_type").notNull(),
+  oldFeeBps: t.bigint().notNull(),
+  newFeeBps: t.bigint().notNull(),
+  blockNumber: t.integer().notNull(),
+  timestamp: t.timestamp().notNull(),
+  ...defaultColumns(t, false),
+});
+
+export const BasinFeeChange = onchainTable("basin_fee_change", BasinFeeChangeColumns, (t) => ({
+  id: primaryKey({ columns: [t.chainId, t.txHash, t.logIndex] }),
+  basinTimestampIdx: index().on(t.basinAddress, t.tokenId, t.timestamp),
+}));
+
+export const BasinFeeChangeRelations = relations(BasinFeeChange, ({ one }) => ({
+  basinFee: one(BasinFee, {
+    fields: [BasinFeeChange.chainId, BasinFeeChange.basinAddress, BasinFeeChange.tokenId],
+    references: [BasinFee.chainId, BasinFee.basinAddress, BasinFee.tokenId],
+  }),
+}));
+
+export const BasinFeeRelations = relations(BasinFee, ({ many }) => ({
+  changes: many(BasinFeeChange),
+}));
+
+/**
+ * Creates a snapshot schema by selecting specific columns from a base table schema
+ * @param columns - The base table column definition function
+ * @param selectKeys - Array of column keys to include in the snapshot
+ * @returns A new column definition function with snapshot-specific columns added
+ * @template F - Type of the base column definition function
+ * @template O - Array of keys from the base column definition return type
+ */
+function snapshotColumns<F extends PgColumnsFunction, O extends Array<keyof ReturnType<F>>>(
+  columns: F,
+  selectKeys: O
+) {
+  return (t: Parameters<F>[0]) => {
+    const initialColumns = columns(t);
+    const entries = Object.entries(initialColumns);
+    const selectedColumns = Object.fromEntries(
+      entries.filter(([key]) => selectKeys.includes(key as keyof ReturnType<F>))
+    );
+    const snapshotColumns = {
+      timestamp: t.timestamp().notNull(),
+      blockNumber: t.integer().notNull(),
+      trigger: t.text().notNull(),
+      triggerTxHash: t.hex(),
+      triggerChainId: t.text().notNull(),
+      ...(selectedColumns as Pick<ReturnType<F>, O[number]>),
+    };
+    return snapshotColumns;
+  };
+}
+
+/**
+ * Creates a default column definition function with createdAt and updatedAt columns
+ * @param t - The PgColumnsBuilders instance
+ * @returns A new column definition function with createdAt and updatedAt columns
+ */
+function defaultColumns(t: PgColumnsBuilders, update: true): DefaultColumns<true>;
+function defaultColumns(t: PgColumnsBuilders, update: false): DefaultColumns<false>;
+function defaultColumns(t: PgColumnsBuilders, update?: boolean): DefaultColumns<true>;
+function defaultColumns(
+  t: PgColumnsBuilders,
+  update = true
+): DefaultColumns<true> | DefaultColumns<false> {
+  if (update) {
+    return {
+      createdAt: t.timestamp().notNull(),
+      createdAtBlock: t.integer().notNull(),
+      createdAtTxHash: t.hex().notNull(),
+      updatedAt: t.timestamp().notNull(),
+      updatedAtBlock: t.integer().notNull(),
+      updatedAtTxHash: t.hex().notNull(),
+    };
+  } else {
+    return {
+      createdAt: t.timestamp().notNull(),
+      createdAtBlock: t.integer().notNull(),
+      createdAtTxHash: t.hex().notNull(),
+    };
+  }
+}
+type DefaultColumns<U extends boolean> = U extends true
+  ? {
+      createdAt: PgColumn<"timestamp">;
+      createdAtBlock: PgColumn<"integer">;
+      createdAtTxHash: PgColumn<"hex">;
+      updatedAt: PgColumn<"timestamp">;
+      updatedAtBlock: PgColumn<"integer">;
+      updatedAtTxHash: PgColumn<"hex">;
+    }
+  : {
+      createdAt: PgColumn<"timestamp">;
+      createdAtBlock: PgColumn<"integer">;
+      createdAtTxHash: PgColumn<"hex">;
+    };
+
+type TimestamperFields<N extends string> = {
+  [K in `${N}At`]: PgColumn<"timestamp">;
+} & {
+  [K in `${N}AtBlock`]: PgColumn<"integer">;
+} & {
+  [K in `${N}AtTxHash`]: PgColumn<"hex">;
+};
+
+type NotNullTimestamperFields<N extends string> = {
+  [K in `${N}At`]: NotNull<PgColumn<"timestamp">>;
+} & {
+  [K in `${N}AtBlock`]: NotNull<PgColumn<"integer">>;
+} & {
+  [K in `${N}AtTxHash`]: NotNull<PgColumn<"hex">>;
+};
+
+function timestamperFields<N extends string>(
+  t: PgColumnsBuilders,
+  fieldName: N
+): TimestamperFields<N>;
+function timestamperFields<N extends string>(
+  t: PgColumnsBuilders,
+  fieldName: N,
+  required: true
+): NotNullTimestamperFields<N>;
+function timestamperFields<N extends string>(
+  t: PgColumnsBuilders,
+  fieldName: N,
+  required: false
+): TimestamperFields<N>;
+
+/**
+ * Creates a timestamper fields object for a given field name.
+ * @param t - The PgColumnsBuilders instance
+ * @param fieldName - The name of the field to create a timestamper fields for
+ * @param nullable - Whether the fields should be nullable
+ * @returns A timestamper fields object
+ */
+function timestamperFields<N extends string>(
+  t: PgColumnsBuilders,
+  fieldName: N,
+  required: boolean = false
+): TimestamperFields<N> | NotNullTimestamperFields<N> {
+  if (required) {
+    return {
+      [fieldName + "At"]: t.timestamp().notNull(),
+      [fieldName + "AtBlock"]: t.integer().notNull(),
+      [fieldName + "AtTxHash"]: t.hex().notNull(),
+    } as NotNullTimestamperFields<N>;
+  } else {
+    return {
+      [fieldName + "At"]: t.timestamp(),
+      [fieldName + "AtBlock"]: t.integer(),
+      [fieldName + "AtTxHash"]: t.hex(),
+    } as TimestamperFields<N>;
+  }
+}
+
+type TimestamperWithChainFields<N extends string> = TimestamperFields<N> & {
+  [K in `${N}AtChainId`]: PgColumn<"integer">;
+};
+
+/**
+ * Timestamper fields plus chain id for multichain fact columns.
+ * @param t - PgColumnsBuilders instance
+ * @param fieldName - Base field name (e.g. prepared)
+ * @returns At, AtBlock, AtTxHash, AtChainId fields (all nullable)
+ */
+function timestamperFieldsWithChain<N extends string>(
+  t: PgColumnsBuilders,
+  fieldName: N
+): TimestamperWithChainFields<N> {
+  return {
+    ...timestamperFields(t, fieldName, false),
+    [fieldName + "AtChainId"]: t.integer(),
+  } as TimestamperWithChainFields<N>;
+}

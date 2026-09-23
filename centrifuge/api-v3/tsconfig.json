@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    // Type checking
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+
+    // Interop constraints
+    "verbatimModuleSyntax": false,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "allowJs": true,
+
+    // Language and environment
+    "moduleResolution": "bundler",
+    "module": "ES2022",
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "target": "ES2022",
+
+    // Skip type checking for node modules
+    "skipLibCheck": true,
+    "incremental": true,
+
+  },
+  "include": ["./**/*.ts", "./**/*.mts", "./**/*.d.ts"],
+  "exclude": ["node_modules", ".eslintrc.cjs", "scripts/**/*.ts"]
+}

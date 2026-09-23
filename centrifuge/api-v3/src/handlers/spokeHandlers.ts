@@ -1,0 +1,362 @@
+import { multiMapper } from "../helpers/multiMapper";
+import { logEvent, serviceError, serviceWarn } from "../helpers/logger";
+import {
+  BlockchainService,
+  AssetService,
+  PoolService,
+  TokenInstanceService,
+  HoldingEscrowService,
+  TokenService,
+  InvestorTransactionService,
+  AccountService,
+  TokenInstancePositionService,
+  EscrowService,
+} from "../services";
+import { ERC20Abi } from "../../abis/ERC20";
+import { snapshotter } from "../helpers/snapshotter";
+import { HoldingEscrowSnapshot } from "ponder:schema";
+import { deployVault, linkVault, unlinkVault } from "./vaultRegistryHandlers";
+import { getInitialHolders } from "../config";
+import { initialisePosition } from "../services";
+import { readContractSafe } from "../helpers/readContractSafe";
+import { resolveDecimalsForInit } from "../helpers/decimalsResolver";
+import { isLiveIndexingBlock } from "../helpers/liveIndexingWindow";
+
+multiMapper("spoke:DeployVault", deployVault);
+
+multiMapper("spoke:RegisterAsset", async ({ event, context }) => {
+  //Fires first to request registration to HUB
+  logEvent(event, context, "spoke:RegisterAsset");
+  const {
+    assetId,
+    asset: assetAddress,
+    tokenId: assetTokenId,
+    name,
+    symbol,
+    decimals,
+  } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  // Detect a duplicate registration: the same (chain, address, ERC-6909 tokenId) already registered
+  // under a different assetId. Both rows are recorded faithfully; spoke lookups via getByToken use the
+  // newest by createdAtBlock. Idempotency per (chain, address, tokenId) must be enforced on-chain.
+  const existingForToken = await AssetService.query(context, {
+    centrifugeId,
+    address: assetAddress,
+    assetTokenId,
+  });
+  const duplicate = existingForToken.find((existing) => existing.read().id !== assetId);
+  if (duplicate) {
+    serviceWarn(
+      `Duplicate asset registration for (centrifugeId=${centrifugeId}, address=${assetAddress}, ` +
+        `assetTokenId=${assetTokenId}): existing assetId ${duplicate.read().id}, new assetId ${assetId}. ` +
+        `Recording both; getByToken will use the newest registration. Resolve idempotency on-chain.`
+    );
+  }
+
+  const _asset = (await AssetService.upsert(
+    context,
+    {
+      id: assetId,
+      centrifugeId,
+      address: assetAddress,
+      decimals: decimals,
+      name: name,
+      symbol: symbol,
+      assetTokenId,
+    },
+    event
+  )) as AssetService | null;
+
+  await AssetService.backfillPoolDecimals(context, assetId, Number(decimals), event);
+});
+
+multiMapper("spoke:AddShareClass", async ({ event, context }) => {
+  logEvent(event, context, "spoke:AddShareClass");
+  const { poolId, scId: tokenId, token: tokenAddress } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const totalSupplyResult = await readContractSafe(context, event, {
+    abi: ERC20Abi,
+    address: tokenAddress,
+    functionName: "totalSupply",
+  });
+  const totalSupply = totalSupplyResult ?? 0n;
+
+  const shareDecimals = await resolveDecimalsForInit(context, event, {
+    tokenId,
+    centrifugeId,
+    poolId,
+    poolCentrifugeId: centrifugeId,
+    tokenAddress,
+    pinToEvent: true,
+  });
+  if (typeof shareDecimals !== "number") {
+    serviceError(
+      `spoke:AddShareClass decimals not resolved tokenId=${tokenId} address=${tokenAddress}`
+    );
+    return;
+  }
+
+  const token = (await TokenService.getOrInit(
+    context,
+    {
+      id: tokenId,
+      poolId,
+      centrifugeId,
+      decimals: shareDecimals,
+    },
+    event
+  )) as TokenService;
+
+  const init = await TokenInstanceService.initializeShareClass(context, event, {
+    address: tokenAddress,
+    tokenId,
+    poolId,
+    centrifugeId,
+    totalSupply,
+    decimals: shareDecimals,
+  });
+
+  const { instance: tokenInstance, prevInstanceIssuance } = init;
+  token.setDecimals(shareDecimals);
+
+  const pool = (await PoolService.get(context, { id: poolId })) as PoolService | null;
+  const canActivate = pool != null;
+
+  if (!canActivate) {
+    serviceWarn(
+      `spoke:AddShareClass deferred activation poolId=${poolId} tokenId=${tokenId} ` +
+        `poolIndexed=${pool != null}`
+    );
+  } else {
+    token.activate();
+    tokenInstance.activate();
+
+    if (prevInstanceIssuance === 0n) {
+      const initialHolders: string[] = getInitialHolders(poolId, tokenId, centrifugeId);
+      if (initialHolders.length > 0) {
+        await Promise.all(
+          initialHolders.map(async (holder: string) => {
+            (await TokenInstancePositionService.getOrInit(
+              context,
+              {
+                tokenId,
+                centrifugeId,
+                accountAddress: holder.toLowerCase() as `0x${string}`,
+              },
+              event,
+              async (tokenInstancePosition) =>
+                await initialisePosition(context, event, tokenAddress, tokenInstancePosition)
+            )) as TokenInstancePositionService;
+          })
+        );
+      }
+    }
+  }
+
+  await tokenInstance.save(event);
+  await TokenService.syncTotalIssuanceFromInstances(context, tokenId, event, token);
+});
+
+multiMapper("spoke:UpdateSharePrice", async ({ event, context }) => {
+  logEvent(event, context, "spoke:PriceUpdate");
+  const {
+    //poolId,
+    scId: tokenId,
+    // tokenId: _tokenId,
+    price: tokenPrice,
+    computedAt: _computedAt,
+  } = event.args;
+  const computedAt = new Date(Number(_computedAt.toString()) * 1000);
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const tokenInstance = (await TokenInstanceService.get(context, {
+    tokenId,
+    centrifugeId,
+  })) as TokenInstanceService;
+  if (!tokenInstance) return serviceError(`TokenInstance not found. Cannot update token price`);
+
+  await tokenInstance.setTokenPrice(tokenPrice).setComputedAt(computedAt);
+  if (isLiveIndexingBlock(event.block.timestamp)) {
+    tokenInstance.setCrosschainInProgress();
+  }
+  await tokenInstance.save(event);
+});
+
+multiMapper("spoke:UpdateAssetPrice", async ({ event, context }) => {
+  logEvent(event, context, "spoke:UpdateAssetPrice");
+
+  const {
+    poolId: poolId,
+    scId: tokenId,
+    asset: assetAddress,
+    tokenId: assetTokenId,
+    price: assetPrice,
+    //computedAt,
+  } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const escrow = await EscrowService.getLatest(context, { poolId, centrifugeId });
+  if (!escrow) {
+    serviceError(`Escrow address not found. Cannot retrieve escrow address for holding escrow`);
+    return;
+  }
+  const { address: escrowAddress } = escrow.read();
+
+  const asset = await AssetService.getByToken(context, {
+    centrifugeId,
+    address: assetAddress,
+    assetTokenId,
+  });
+  if (!asset) {
+    serviceError(`Asset not found. Cannot retrieve assetId for holding escrow`);
+    return;
+  }
+  const { id: assetId } = asset.read();
+
+  const holdingEscrow = (await HoldingEscrowService.getOrInit(
+    context,
+    {
+      poolId,
+      tokenId,
+      centrifugeId,
+      assetAddress,
+      assetId,
+      escrowAddress,
+    },
+    event
+  )) as HoldingEscrowService;
+
+  holdingEscrow.setEscrowAddress(escrowAddress).setAssetPrice(assetPrice);
+  if (isLiveIndexingBlock(event.block.timestamp)) {
+    holdingEscrow.setCrosschainInProgress();
+  }
+  await holdingEscrow.save(event);
+
+  await snapshotter(
+    context,
+    event,
+    "spokeV3_1:UpdateAssetPrice",
+    [holdingEscrow],
+    HoldingEscrowSnapshot
+  );
+});
+
+multiMapper("spoke:UpdateMaxAssetPriceAge", async ({ event, context }) => {
+  logEvent(event, context, "spoke:UpdateMaxAssetPriceAge");
+
+  const {
+    poolId,
+    scId: tokenId,
+    asset: assetAddress,
+    tokenId: assetTokenId,
+    maxPriceAge,
+  } = event.args;
+
+  const centrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const escrow = await EscrowService.getLatest(context, { poolId, centrifugeId });
+  if (!escrow) {
+    serviceError(`Escrow address not found. Cannot retrieve escrow address for holding escrow`);
+    return;
+  }
+  const { address: escrowAddress } = escrow.read();
+
+  const asset = await AssetService.getByToken(context, {
+    centrifugeId,
+    address: assetAddress,
+    assetTokenId,
+  });
+  if (!asset) {
+    serviceError(`Asset not found. Cannot retrieve assetId for holding escrow`);
+    return;
+  }
+  const { id: assetId } = asset.read();
+
+  const holdingEscrow = (await HoldingEscrowService.getOrInit(
+    context,
+    {
+      poolId,
+      tokenId,
+      centrifugeId,
+      assetAddress,
+      assetId,
+      escrowAddress,
+    },
+    event
+  )) as HoldingEscrowService;
+
+  await holdingEscrow.setEscrowAddress(escrowAddress).setMaxAssetPriceAge(maxPriceAge).save(event);
+
+  await snapshotter(
+    context,
+    event,
+    "spokeV3_1:UpdateMaxAssetPriceAge",
+    [holdingEscrow],
+    HoldingEscrowSnapshot
+  );
+});
+
+multiMapper("spoke:InitiateTransferShares", async ({ event, context }) => {
+  logEvent(event, context, "spoke:InitiateTransferShares");
+  const {
+    centrifugeId: toCentrifugeId,
+    poolId,
+    scId: tokenId,
+    sender,
+    destinationAddress,
+    amount,
+  } = event.args;
+
+  const fromCentrifugeId = await BlockchainService.getCentrifugeId(context);
+
+  const [fromAccount, toAccount] = (await Promise.all([
+    AccountService.getOrInit(context, { address: sender.substring(0, 42) as `0x${string}` }, event),
+    AccountService.getOrInit(
+      context,
+      { address: destinationAddress.substring(0, 42) as `0x${string}` },
+      event
+    ),
+  ])) as [AccountService, AccountService];
+
+  const { address: fromAccountAddress } = fromAccount.read();
+  const { address: toAccountAddress } = toAccount.read();
+
+  const transferData = {
+    poolId,
+    tokenId,
+    tokenAmount: amount,
+    centrifugeId: fromCentrifugeId,
+    fromAccount: fromAccountAddress,
+    toAccount: toAccountAddress,
+    fromCentrifugeId: fromCentrifugeId,
+    toCentrifugeId: toCentrifugeId.toString(),
+  } as const;
+
+  await Promise.all([
+    InvestorTransactionService.transferOut(
+      context,
+      {
+        ...transferData,
+        account: fromAccountAddress,
+      },
+      event
+    ),
+    InvestorTransactionService.transferIn(
+      context,
+      {
+        ...transferData,
+        account: toAccountAddress,
+      },
+      event
+    ),
+  ]);
+});
+
+multiMapper("spoke:LinkVault", linkVault);
+multiMapper("spoke:UnlinkVault", unlinkVault);

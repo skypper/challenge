@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {Create3} from "./Create3.sol";
+import {IDeployGate} from "./IDeployGate.sol";
+
+/// @title  DeployGate
+/// @notice Deploys a set of contracts through CREATE3 in two steps. First an account commits what may be
+///         deployed in its namespace: which contracts, under which salts, in what order, and who may send
+///         them. Then any of the executors it named deploys them, one at a time and nothing else.
+///         Committing is one transaction whatever the contract count.
+///
+///         A namespace can let a delegate commit on its behalf, which is how a cold key keeps the addresses
+///         while a warmer one signs. Two things bound what that costs if the delegate key is lost: what a
+///         delegate commits is not deployable until the namespace's delay has passed, and `clear` empties
+///         the namespace in one call, delegations and commitments alike. A delegate can clear too, so
+///         shutting a leaked key out does not wait on the cold one. Clearing revokes every delegation, the
+///         caller's own included.
+///
+/// @dev    One gate serves everyone: it takes no constructor arguments, holds no privilege of its own, and
+///         holds none over anything it deploys, so it is the same contract at the same address on every
+///         chain and whoever finds a chain without one deploys it themselves.
+///
+///         That rests on the gate being deployed through CREATE2, where the address covers the init code,
+///         and not through CREATE3, where it does not: a CREATE3 gate address would be code anyone could
+///         choose, and this contract's code is the whole of its authority.
+contract DeployGate is IDeployGate {
+    // Namespaces
+    mapping(address namespace => Namespace) public namespaces;
+    mapping(address namespace => mapping(uint64 term => mapping(address who => bool))) internal _isDelegate;
+
+    // Commitments
+    mapping(address namespace => mapping(bytes32 id => Commitment)) public commitments;
+    mapping(bytes32 scope => mapping(uint64 nonce => mapping(address who => bool))) internal _executor;
+    mapping(bytes32 scope => mapping(uint64 nonce => mapping(bytes32 salt => bytes32 hash))) internal _committed;
+
+    modifier onlyNamespaceOrDelegate(address namespace) {
+        require(msg.sender == namespace || isDelegate(namespace, msg.sender), NotAuthorized());
+        _;
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // Committing
+    //----------------------------------------------------------------------------------------------
+
+    /// @inheritdoc IDeployGate
+    function commit(
+        address namespace,
+        bytes32 id,
+        bytes32[] calldata salts,
+        bytes32[] calldata initCodeHashes,
+        address[] calldata executors
+    ) external onlyNamespaceOrDelegate(namespace) {
+        require(salts.length == initCodeHashes.length, LengthMismatch());
+
+        (uint64 current, uint64 startsAt, uint64 currentTerm) = _open(namespace, id, salts, initCodeHashes, executors);
+
+        emit Commit(namespace, id, current, currentTerm, startsAt, salts, initCodeHashes, executors);
+    }
+
+    function _open(
+        address namespace,
+        bytes32 id,
+        bytes32[] calldata salts,
+        bytes32[] calldata initCodeHashes,
+        address[] calldata executors
+    ) internal returns (uint64 current, uint64 startsAt, uint64 currentTerm) {
+        currentTerm = namespaces[namespace].term;
+
+        // A namespace's own commitment is deployable at once and a delegate's waits, which is the window in
+        // which one nobody meant to make can still be cleared
+        if (msg.sender != namespace) {
+            uint64 delay_ = namespaces[namespace].delay;
+            if (delay_ != 0) startsAt = uint64(block.timestamp) + delay_;
+        }
+
+        Commitment storage commitment_ = commitments[namespace][id];
+        current = ++commitment_.nonce;
+        commitment_.term = currentTerm;
+        commitment_.cursor = 0;
+        commitment_.deployableAt = startsAt;
+
+        bytes32 scope = _scopeOf(namespace, currentTerm, id);
+        for (uint256 i; i < executors.length; i++) {
+            _executor[scope][current][executors[i]] = true;
+        }
+
+        for (uint256 i; i < salts.length; i++) {
+            // A repeat would leave one entry behind two positions in the log, so what it says would stop
+            // being what is enforceable, and only one of the two would be reachable
+            require(_committed[scope][current][salts[i]] == 0, DuplicateSalt(salts[i]));
+
+            _committed[scope][current][salts[i]] = commitment(initCodeHashes[i], i);
+        }
+    }
+
+    /// @inheritdoc IDeployGate
+    function setDelegate(address delegatee, bool isValid) external {
+        _isDelegate[msg.sender][namespaces[msg.sender].term][delegatee] = isValid;
+        emit SetDelegate(msg.sender, delegatee, isValid);
+    }
+
+    /// @inheritdoc IDeployGate
+    function setDelay(uint64 seconds_) external {
+        namespaces[msg.sender].delay = seconds_;
+        emit SetDelay(msg.sender, seconds_);
+    }
+
+    /// @inheritdoc IDeployGate
+    function clear(address namespace) external onlyNamespaceOrDelegate(namespace) {
+        uint64 current = ++namespaces[namespace].term;
+        emit Clear(namespace, current);
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // Deployment
+    //----------------------------------------------------------------------------------------------
+
+    /// @inheritdoc IDeployGate
+    function deploy(address namespace, bytes32 id, bytes32 salt, bytes calldata initCode)
+        external
+        returns (address target)
+    {
+        Commitment storage commitment_ = commitments[namespace][id];
+        uint64 currentTerm = namespaces[namespace].term;
+        bytes32 scope = _scopeOf(namespace, currentTerm, id);
+        uint64 current = commitment_.nonce;
+        require(_executor[scope][current][msg.sender], NotExecutor());
+
+        uint64 startsAt = commitment_.deployableAt;
+        require(block.timestamp >= startsAt, NotYetDeployable(startsAt));
+
+        bytes32 expected = commitment(keccak256(initCode), commitment_.cursor);
+        require(_committed[scope][current][salt] == expected, NotCommitted(salt));
+
+        delete _committed[scope][current][salt];
+        ++commitment_.cursor;
+
+        target = Create3.deploy(namespaceSalt(namespace, salt), initCode);
+        emit Deploy(namespace, id, currentTerm, current, salt, target);
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // View methods
+    //----------------------------------------------------------------------------------------------
+
+    /// @inheritdoc IDeployGate
+    function isDelegate(address namespace, address who) public view returns (bool) {
+        return _isDelegate[namespace][namespaces[namespace].term][who];
+    }
+
+    /// @inheritdoc IDeployGate
+    function isExecutor(address namespace, bytes32 id, address who) external view returns (bool) {
+        return _executor[_scopeOf(namespace, namespaces[namespace].term, id)][commitments[namespace][id].nonce][who];
+    }
+
+    /// @inheritdoc IDeployGate
+    function committed(address namespace, bytes32 id, bytes32 salt) external view returns (bytes32) {
+        return _committed[_scopeOf(namespace, namespaces[namespace].term, id)][commitments[namespace][id].nonce][salt];
+    }
+
+    function _scopeOf(address namespace, uint64 term_, bytes32 id) internal pure returns (bytes32) {
+        return keccak256(abi.encode(namespace, term_, id));
+    }
+
+    /// @inheritdoc IDeployGate
+    function commitment(bytes32 initCodeHash, uint256 index) public pure returns (bytes32) {
+        return keccak256(abi.encode(initCodeHash, index));
+    }
+
+    /// @inheritdoc IDeployGate
+    function namespaceSalt(address namespace, bytes32 salt) public pure returns (bytes32) {
+        return keccak256(abi.encode(namespace, salt));
+    }
+
+    /// @inheritdoc IDeployGate
+    function addressOf(address namespace, bytes32 salt) external view returns (address) {
+        return Create3.addressOf(namespaceSalt(namespace, salt), address(this));
+    }
+}

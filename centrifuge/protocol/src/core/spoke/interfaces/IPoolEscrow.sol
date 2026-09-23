@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma solidity >=0.5.0;
+
+import {IRecoverable} from "../../../misc/Recoverable.sol";
+import {IEscrow} from "../../../misc/interfaces/IEscrow.sol";
+
+import {PoolId} from "../../types/PoolId.sol";
+import {ShareClassId} from "../../types/ShareClassId.sol";
+
+struct Holding {
+    uint128 total;
+    uint128 reserved;
+}
+
+/// @title Per-Pool Escrow separating funds by pool and share class
+interface IPoolEscrow is IEscrow, IRecoverable {
+    //----------------------------------------------------------------------------------------------
+    // Events
+    //----------------------------------------------------------------------------------------------
+
+    /// @notice Emitted when a deposit is made
+    /// @param asset The address of the deposited asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param poolId The id of the pool
+    /// @param scId The id of the share class
+    /// @param value The amount deposited
+    event Deposit(
+        address indexed asset, uint256 indexed tokenId, PoolId indexed poolId, ShareClassId scId, uint128 value
+    );
+
+    /// @notice Emitted when an amount is reserved
+    /// @param asset The address of the reserved asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param poolId The id of the pool
+    /// @param scId The id of the share class
+    /// @param caller The address of the manager creating the reservation
+    /// @param reason The reason code for the reservation
+    /// @param delta The delta amount reserved
+    /// @param value The new absolute amount reserved
+    event IncreaseReserve(
+        address indexed asset,
+        uint256 indexed tokenId,
+        PoolId indexed poolId,
+        ShareClassId scId,
+        address caller,
+        bytes32 reason,
+        uint128 delta,
+        uint128 value
+    );
+
+    /// @notice Emitted when an amount is unreserved
+    /// @param asset The address of the reserved asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param poolId The id of the pool
+    /// @param scId The id of the share class
+    /// @param caller The address of the manager that created the reservation
+    /// @param reason The reason code that was used when reserving
+    /// @param delta The delta amount unreserved
+    /// @param value The new absolute amount reserved
+    event DecreaseReserve(
+        address indexed asset,
+        uint256 indexed tokenId,
+        PoolId indexed poolId,
+        ShareClassId scId,
+        address caller,
+        bytes32 reason,
+        uint128 delta,
+        uint128 value
+    );
+
+    /// @notice Emitted when a withdraw is made
+    /// @param asset The address of the withdrawn asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param poolId The id of the pool
+    /// @param scId The id of the share class
+    /// @param receiver The address receiving the withdrawn assets
+    /// @param value The amount withdrawn
+    event Withdraw(
+        address indexed asset,
+        uint256 indexed tokenId,
+        PoolId indexed poolId,
+        ShareClassId scId,
+        address receiver,
+        uint128 value
+    );
+
+    //----------------------------------------------------------------------------------------------
+    // Errors
+    //----------------------------------------------------------------------------------------------
+
+    /// @notice Dispatched when the balance of the escrow did not increase sufficiently
+    error InsufficientDeposit();
+
+    /// @notice Dispatched when the outstanding reserved amount is insufficient for the decrease
+    error InsufficientReserve();
+
+    //----------------------------------------------------------------------------------------------
+    // Functions
+    //----------------------------------------------------------------------------------------------
+
+    /// @notice Deposits `value` of `asset` in underlying `poolId` and given `scId`
+    /// @dev NOTE: Must ensure balance sufficiency, i.e. that the depositing amount does not exceed the balance of escrow
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset to be deposited
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param value The amount to deposit
+    function deposit(ShareClassId scId, address asset, uint256 tokenId, uint128 value) external;
+
+    /// @notice Withdraws `value` of `asset` in underlying `poolId` and given `scId`
+    /// @dev Accounting only: decreases `total` by `value` and reverts unless the available
+    ///      (non-reserved) balance covers `value`. The caller pairs it with `authTransferTo`
+    ///      to move the actual tokens.
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset to be withdrawn
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param receiver The address receiving the withdrawn assets
+    /// @param value The amount to withdraw
+    function withdraw(ShareClassId scId, address asset, uint256 tokenId, address receiver, uint128 value) external;
+
+    /// @notice Increases the reserved amount of `value` for `asset` in underlying `poolId` and given `scId`
+    /// @dev Reserves funds in the bucket keyed by `caller` and `reason`. These are unauthenticated accounting keys
+    ///      (not checked against `msg.sender`); access is gated only by `auth` (the trusted Spoke). Per-key isolation
+    ///      holds, but which key is used is the trusted caller's choice. See {ISpoke.reserve} for the trust model.
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset to be reserved
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param value The amount to reserve
+    /// @param caller The bucket owner recorded for the reservation (an accounting key supplied by the Spoke, not an
+    ///               authenticated identity)
+    /// @param reason The reservation bucket; an accounting key, not an authenticated identity
+    function reserve(ShareClassId scId, address asset, uint256 tokenId, uint128 value, address caller, bytes32 reason)
+        external;
+
+    /// @notice Decreases the reserved amount of `value` for `asset` in underlying `poolId` and given `scId`
+    /// @dev Unreserves funds from a specific bucket. MUST fail if bucket has insufficient funds.
+    /// @dev As with {reserve}, `caller` and `reason` are unauthenticated accounting keys: any authorized caller can
+    ///      unreserve any bucket, including one another manager booked. See {ISpoke.unreserve} for the trust model.
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset to be unreserved
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @param value The amount to decrease
+    /// @param caller The bucket owner recorded for the reservation (an accounting key, not an authenticated identity)
+    /// @param reason The reason code that was used when reserving; an accounting key, not an authenticated identity
+    function unreserve(ShareClassId scId, address asset, uint256 tokenId, uint128 value, address caller, bytes32 reason)
+        external;
+
+    /// @notice Provides the available balance of `asset` in underlying `poolId` and given `scId`
+    /// @dev MUST return the balance minus the reserved amount
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset to be checked
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @return The available balance
+    function availableBalanceOf(ShareClassId scId, address asset, uint256 tokenId) external view returns (uint128);
+
+    /// @notice Returns the pool id of this escrow
+    /// @return The pool id
+    function poolId() external view returns (PoolId);
+
+    /// @notice Returns the holding details for a given share class, asset and token id
+    /// @param scId The id of the share class
+    /// @param asset The address of the asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @return total The total amount held
+    /// @return reserved The reserved amount
+    function holding(ShareClassId scId, address asset, uint256 tokenId)
+        external
+        view
+        returns (uint128 total, uint128 reserved);
+
+    /// @notice Returns the reserved amount for a specific reserver, reason, asset and token id
+    /// @param scId The id of the share class
+    /// @param reserver The address of the reserver
+    /// @param reason The reason code for the reservation
+    /// @param asset The address of the asset
+    /// @param tokenId The id of the asset - 0 for ERC20
+    /// @return The reserved amount
+    function reservedBy(ShareClassId scId, address reserver, bytes32 reason, address asset, uint256 tokenId)
+        external
+        view
+        returns (uint128);
+}

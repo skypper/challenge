@@ -1,5 +1,9 @@
 .env
-centrifuge/
 .DS_Store
 node_modules/
 data/
+_git_disabled/
+centrifuge/v1/
+centrifuge/v2/
+centrifuge/audits/
+centrifuge/p2p/

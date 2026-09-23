@@ -1,0 +1,39 @@
+@startuml admin
+title Admin
+hide empty members
+
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 50
+
+package core {
+    interface IGateway
+    interface IMultiAdapter
+    interface IScheduleAuthMessageSender
+    interface ICreatePool
+    interface IAuth
+}
+
+package bridge {
+    interface ITokenBridge
+}
+
+interface IAdapterWiring
+
+class OpsGuardian
+class ProtocolGuardian
+class Root
+
+OpsGuardian --> IMultiAdapter : blockSession/setAdapters
+OpsGuardian --> IGateway : setGasService
+OpsGuardian --> IAdapterWiring : wire
+OpsGuardian --> ICreatePool : createPool
+OpsGuardian --> ITokenBridge : fileTokenBridgeCentrifugeId
+
+ProtocolGuardian --> Root : scheduleRely
+ProtocolGuardian -right-> IScheduleAuthMessageSender : scheduleUpgrade
+ProtocolGuardian --> ITokenBridge : fileTokenBridgeRelayer
+
+Root .[dotted].> IAuth
+
+@enduml

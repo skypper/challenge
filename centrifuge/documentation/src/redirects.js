@@ -1,0 +1,391 @@
+const redirects = [
+  // Domain-level redirect (Note: This needs to be handled at the server level, not in Docusaurus)
+  // https://developer.centrifuge.io/* -> https://docs.centrifuge.io/:splat
+
+  // Cent-node redirects
+  {
+    from: "/cent-node/further-reading/testnets/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/cent-node/getting-started/chain-account/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/further-reading/disclaimer/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/further-reading/protocol-limitations/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/getting-started/configuration/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/getting-started/geth-account/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/getting-started/install-cent-node/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/getting-started/ping/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/getting-started/tools/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/overview/introduction/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/overview/protocol-architecture/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/cent-node/usage/rest-api-examples/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+
+  // Chain redirects
+  {
+    from: "/chain/ethereum-bridge/about/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/ethereum-bridge/bridge-operations/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/further-resources/resources/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/get-started/account/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/get-started/run-node/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/chain/get-started/validate/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/governance/about-governance/",
+    to: "/getting-started/cfg-governance/",
+  },
+  {
+    from: "/chain/overview/testnets/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/chain/overview/introduction/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+
+  // Tinlake redirects
+  {
+    from: "/tinlake/contracts/contracts/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/further-information/offering-structure/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/overview/introduction/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/overview/pricing_rwa/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/overview/tranches/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/userguide/securitize/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/userguide/investing/",
+    to: "/developer/legacy/tinlake/",
+  },
+
+  // NFTs redirects
+  {
+    from: "/nfts/overview/anatomy/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/nfts/overview/introduction/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/nfts/overview/verification/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+
+  // 2024 Layout Update redirects
+  {
+    from: "/learn/",
+    to: "/",
+  },
+  {
+    from: "/faq/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/centrifuge-at-a-glance/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/privacy-first-tokenization/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/securitization/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/cent-chain/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/integrated-with-defi/",
+    to: "/",
+  },
+  {
+    from: "/getting-started/off-chain/",
+    to: "/",
+  },
+
+  // Learn section redirects
+  {
+    from: "/learn/terms/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/multi-tranche-system/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/epoch/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/pool-valuation/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/interest-rate-methodology/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/legal-offering/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/learn/token-summary/",
+    to: "/",
+  },
+
+  // Base redirects for main sections
+  {
+    from: "/use/setup-wallet",
+    to: "/user/overview/",
+  },
+  {
+    from: "/use/onboarding",
+    to: "/user/overview/",
+  },
+  {
+    from: "/use/Invest",
+    to: "/user/overview/",
+  },
+  {
+    from: "/use/claim-cfg-rewards/",
+    to: "/",
+  },
+  {
+    from: "/use/governance-process/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/use/pop/",
+    to: "/user/overview/",
+  },
+  {
+    from: "/use/offchain-voting/",
+    to: "/getting-started/cfg-governance/",
+  },
+  {
+    from: "/use/onchain-voting/",
+    to: "/getting-started/cfg-governance/",
+  },
+  {
+    from: "/use/governance-proxy-and-delegation/",
+    to: "/getting-started/cfg-governance/",
+  },
+  {
+    from: "/use/council/",
+    to: "/getting-started/cfg-governance/",
+  },
+  {
+    from: "/use/contribute-network/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/use/cfg-bridge/",
+    to: "/",
+  },
+
+  // Build section redirects
+  {
+    from: "/build/cent-chain/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/build/tinlake/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/build/guides/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/developer/protocol/guides/investing-into-a-liquidity-pool/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/developer/guides/querying-data/",
+    to: "/developer/legacy/querying-v2-data/",
+  },
+  {
+    from: "/developer/liquidity-pools/overview/",
+    to: "/developer/protocol/overview/",
+  },
+  {
+    from: "/developer/liquidity-pools/api/",
+    to: "/developer/protocol/overview/",
+  },
+  {
+    from: "/developer/centrifuge-chain/overview/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/developer/centrifuge-chain/codebase/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/developer/centrifuge-chain/networks/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/developer/centrifuge-chain/evm/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/developer/centrifuge-chain/contributing/",
+    to: "/getting-started/legacy/centrifuge-v2/",
+  },
+  {
+    from: "/developer/pod/",
+    to: "/developer/legacy/pod/",
+  },
+  {
+    from: "/build/p2p-node/",
+    to: "/developer/legacy/pod/",
+  },
+  {
+    from: "/developer/protocol/security/",
+    to: "/developer/security/overview/",
+  },
+  {
+    from: "/developer/security/",
+    to: "/developer/security/overview/",
+  },
+  {
+    from: "/build/nfts/",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+  {
+    from: "/build/bridge/",
+    to: "/",
+  },
+
+  // Temporary redirects
+  {
+    from: "/tinlake/contracts/deployments/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/contracts/patterns/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/contracts/proxyactions/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/further-information/interest/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/further-information/nft/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/further-information/liquidation/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/tinlake-js/events/",
+    to: "/developer/legacy/tinlake/",
+  },
+  {
+    from: "/tinlake/tinlake-js/overview/",
+    to: "/developer/legacy/tinlake/",
+  },
+
+  // Handle trailing slashes consistently
+  {
+    from: "/getting-started",
+    to: "/",
+  },
+  {
+    from: "/use",
+    to: "/user/overview/",
+  },
+  {
+    from: "/build",
+    to: "/developer/protocol/guides/invest-into-a-vault/",
+  },
+
+  // Manager guide rename (2026-08): /user/issuer moved to /user/manager
+  {
+    from: "/user/issuer/",
+    to: "/user/manager/",
+  },
+
+  // Concepts restructure (2026-07): pages folded into the new structure
+  {
+    from: "/user/concepts/tokenization/",
+    to: "/user/concepts/share-tokens/",
+  },
+  {
+    from: "/user/concepts/multi-chain/",
+    to: "/user/concepts/pools/",
+  },
+];
+
+export { redirects };
+module.exports = { redirects };

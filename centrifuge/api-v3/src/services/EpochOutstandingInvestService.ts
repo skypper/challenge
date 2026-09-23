@@ -1,0 +1,50 @@
+import type { Event } from "ponder:registry";
+import { Service } from "./Service";
+import { EpochOutstandingInvest } from "ponder:schema";
+import { serviceLog } from "../helpers/logger";
+
+/**
+ * Service class for managing invest orders in the system.
+ *
+ * This service handles invest operations for invest orders,
+ * including computation of approved amounts and execution of requests.
+ * Extends the base Service class with common static methods.
+ */
+export class EpochOutstandingInvestService extends Service<typeof EpochOutstandingInvest> {
+  static readonly entityTable = EpochOutstandingInvest;
+  static readonly entityName = "EpochOutstandingInvest";
+  /**
+   * Updates the pending assets amount for the epoch outstanding invest.
+   *
+   * @param amount - The new pending assets amount to set, as a BigInt value
+   * @returns The current service instance for method chaining
+   */
+  public updatePendingAmount(amount: bigint) {
+    serviceLog(`Updating epoch pending assets amount to ${amount}`);
+    this.data.pendingAssetsAmount = amount;
+    return this;
+  }
+
+  /**
+   * Increases the queued assets amount for the epoch outstanding invest.
+   * @param amount - The amount to increase the queued assets amount by
+   * @returns The current service instance for method chaining
+   */
+  public increaseQueuedAmount(amount: bigint) {
+    serviceLog(`Increasing epoch queued assets amount by ${amount}`);
+    this.data.queuedAssetsAmount = (this.data.queuedAssetsAmount ?? 0n) + amount;
+    return this;
+  }
+
+  /**
+   * Clears the outstanding invest if the queued and pending amounts are 0.
+   *
+   * @returns The service instance for method chaining
+   */
+  public saveOrClear(event: Event) {
+    const clearing = this.data.pendingAssetsAmount === 0n && this.data.queuedAssetsAmount === 0n;
+    serviceLog(`EpochOutstandingInvest saveOrClear clearing=${clearing}`);
+    if (clearing) return this.delete();
+    return this.save(event);
+  }
+}
