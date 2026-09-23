@@ -1,0 +1,11 @@
+{
+  "ContractName": "ShareToken",
+  "CompilerVersion": "v0.8.28+commit.7893614a",
+  "EVMVersion": "cancun",
+  "OptimizationUsed": "1",
+  "Runs": "1",
+  "SimilarMatch": "0xaaa0008c8cf3a7dca931adaf04336a5d808c82cc",
+  "Proxy": "0",
+  "Implementation": "",
+  "LicenseType": ""
+}
