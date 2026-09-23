@@ -113,3 +113,26 @@ simulation of that key's pending transactions is feasible.
 
 Priority: send Q1–Q3 first; they change what gets built. Q4–Q6 sharpen the design note. Q7 if
 there is room.
+
+---
+
+## Our own best answers (2026-09-23, from `06-what-publish-means.md`)
+
+| Q | Best answer from evidence | Confidence | Still ask? |
+|---|---|---|---|
+| Q0 publish | Monthly Settlement Cycle report per prime agent (`soterlabs/settlement-reports`, `reports/grove/2026-08/`: summary.md, xlsx, provenance.json). Value = shares × price + claims; revenue = Δvalue − cash inflow. Daily on-chain pilot in `soterlabs/tally`. Counterparties = Sky and Grove settling on the report. | high | yes, to confirm and to learn cut-off time |
+| Q1 feed | Chronicle. Tally has a `ChroniclePip`; "chronicle points" is a revenue line; ARCHITECTURE says "Chronicle read permission is not a freshness policy". | high | briefly, to confirm the Plume oracle address |
+| Q2 chain | Plume. ACRDX is venue E22, chain `plume`, "Remote position"; 12.02M shares were revoked there on Aug 10. Hub and Chronicle canonical feed stay on Ethereum. | high | yes, to confirm holder address `0x1db91ad5…` is Grove's |
+| Q3 archive | Soter's Tally CI has an `archive-forks` workflow with an RPC secret, so they have archive access. Design for events first, use archive when present. | medium | yes |
+| Q4 May 12 | Unknown. Grove's position is on Plume; the May 12 Ethereum event involved a different holder (`0x43d5…`). Likely not Grove's. | low | yes, lower priority |
+| Q5 hub ledger | Unknown. Nothing in Soter's repos references `totalIssuance`. | low | yes |
+| Q6 price age | Soter's own convention: RelayPip `hop = 1 day`; a stale mark reverts `peek` ("must stop, not guess"). Default to 1 business day. | medium | yes, for the business-day nuance |
+| Q7 issuer key | Ethereum pusher `0x7bf090b9…`; Plume revoke caller `0x8ef19b8c…`. Operator unknown. | low | yes |
+
+New question surfaced by the evidence:
+
+**Q8. The xlsx cash figure.** "For E22 in August, summary.md shows inflow −12,263,707.47
+(12,020,502 shares × 1.020232, the Centrifuge execution price), provenance.json shows
+−12,283,229.22 (× 1.021857, Chronicle's Aug 10 value), and the xlsx shows −12,149,859.77
+(× 1.010762). What priced the xlsx figure, and which of the three is the one counterparties
+settled on?"
