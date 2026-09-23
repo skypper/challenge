@@ -3,6 +3,24 @@
 Submit at least 6 h before the session. Ordered by how much the answer changes the build.
 Each entry: the question as we would send it, why it matters, and what we do under each answer.
 
+## Q0. What does "publish" mean?
+
+**Ask:** "The brief says 'we track this position and publish what it is worth; counterparties
+settle on that number.' What exactly is published: an on-chain value (which contract?), a daily
+report, or a mark in an internal system? How often, with what fields (shares, price, NAV,
+timestamp?), who computes it, and who consumes it to settle?"
+
+**Why:** the published number is the thing the monitor protects. If it is an on-chain value Sky
+writes, that contract is the primary read and the reconciliation is Sky's number vs Chronicle vs
+Centrifuge's settlement price. If it is an off-chain report, the app needs it as an input and
+"cannot read" includes "the report did not arrive". If they mean Centrifuge's own price push,
+the current map already covers it.
+
+**If on-chain, Sky-owned:** add that contract to the snapshot; make it the left leg of I2/I3.
+**If off-chain report:** add a report input with its own freshness check; log its absence as
+`no_verdict`.
+**If Centrifuge's push:** no change.
+
 ## Q1. Which third-party feed?
 
 **Ask:** "The brief says 'the price we take from a third-party feed'. Is that the Chronicle
